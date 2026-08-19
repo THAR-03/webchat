@@ -4,85 +4,58 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
 
-    // Health check
     if (url.pathname === "/health") {
       return Response.json({
         ok: true,
         service: "webchat",
         version: 4,
-        ownerKeyConfigured: Boolean(env.OWNER_KEY),
+        ownerKeyConfigured: !!env.OWNER_KEY
       });
     }
 
-    // WebSocket
     if (url.pathname === "/ws") {
       if (request.headers.get("Upgrade") !== "websocket") {
-        return new Response("WebSocket required", {
-          status: 426,
-        });
+        return new Response("WebSocket required", { status: 426 });
       }
 
       const id = env.CHAT_HUB.idFromName("main");
-      const room = env.CHAT_HUB.get(id);
-
-      return room.fetch(request);
+      return env.CHAT_HUB.get(id).fetch(request);
     }
 
-    // Website
     return env.ASSETS.fetch(request);
-  },
+  }
 };
 
 export class ChatHub extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env);
-
     this.ctx = ctx;
     this.env = env;
-
-    // SQLite persistent storage.
-    this.ctx.storage.sql.exec(`
-      CREATE TABLE IF NOT EXISTS chats (
-        chat_id TEXT PRIMARY KEY,
-        name TEXT NOT NULL,
-        created_at INTEGER NOT NULL,
-        updated_at INTEGER NOT NULL,
-        online INTEGER NOT NULL DEFAULT 0
-      );
-
-      CREATE TABLE IF NOT EXISTS messages (
-        message_id TEXT PRIMARY KEY,
-        chat_id TEXT NOT NULL,
-        sender TEXT NOT NULL,
-        name TEXT NOT NULL,
-        text TEXT NOT NULL,
-        created_at INTEGER NOT NULL
-      );
-
-      CREATE INDEX IF NOT EXISTS idx_messages_chat
-      ON messages(chat_id, created_at);
-
-      CREATE INDEX IF NOT EXISTS idx_chats_updated
-      ON chats(updated_at);
-    `);
   }
 
   async fetch(request) {
+    const url = new URL(request.url);
+
     const pair = new WebSocketPair();
-    const [client, server] = Object.values(pair);
+    const client = pair[0];
+    const server = pair[1];
 
     this.ctx.acceptWebSocket(server);
 
     server.serializeAttachment({
       role: "unknown",
       chatId: "",
-      name: "",
+      name: ""
     });
 
     return new Response(null, {
       status: 101,
-      webSocket: client,
+      webSocket: client
     });
+  }
+
+  getClients() {
+    return this.ctx.getWebSockets();
   }
 
   send(ws, data) {
@@ -92,237 +65,54 @@ export class ChatHub extends DurableObject {
   }
 
   broadcast(data, filter = () => true) {
-    const message = JSON.stringify(data);
+    for (const ws of this.getClients()) {
+      const attachment = ws.deserializeAttachment() || {};
 
-    for (const ws of this.ctx.getWebSockets()) {
-      const attachment =
-        ws.deserializeAttachment() || {};
-
-      if (!filter(attachment, ws)) {
-        continue;
+      if (filter(attachment)) {
+        this.send(ws, data);
       }
-
-      try {
-        ws.send(message);
-      } catch {}
     }
-  }
-
-  getChat(chatId) {
-    const rows = this.ctx.storage.sql
-      .exec(
-        `
-        SELECT
-          chat_id,
-          name,
-          created_at,
-          updated_at,
-          online
-        FROM chats
-        WHERE chat_id = ?
-        LIMIT 1
-        `,
-        chatId
-      )
-      .toArray();
-
-    return rows[0] || null;
-  }
-
-  getAllChats() {
-    return this.ctx.storage.sql
-      .exec(`
-        SELECT
-          chat_id,
-          name,
-          created_at,
-          updated_at,
-          online
-        FROM chats
-        ORDER BY updated_at DESC
-      `)
-      .toArray()
-      .map((chat) => ({
-        chatId: chat.chat_id,
-        name: chat.name,
-        createdAt: chat.created_at,
-        updatedAt: chat.updated_at,
-        online: Boolean(chat.online),
-      }));
-  }
-
-  getHistory(chatId, limit = 100) {
-    const safeLimit = Math.max(
-      1,
-      Math.min(Number(limit) || 100, 500)
-    );
-
-    return this.ctx.storage.sql
-      .exec(
-        `
-        SELECT
-          message_id,
-          chat_id,
-          sender,
-          name,
-          text,
-          created_at
-        FROM messages
-        WHERE chat_id = ?
-        ORDER BY created_at DESC
-        LIMIT ${safeLimit}
-        `,
-        chatId
-      )
-      .toArray()
-      .reverse()
-      .map((message) => ({
-        messageId: message.message_id,
-        chatId: message.chat_id,
-        sender: message.sender,
-        name: message.name,
-        text: message.text,
-        time: new Date(
-          Number(message.created_at)
-        ).toISOString(),
-      }));
-  }
-
-  saveChat(chatId, name, online = true) {
-    const now = Date.now();
-
-    const existing = this.getChat(chatId);
-
-    if (existing) {
-      this.ctx.storage.sql.exec(
-        `
-        UPDATE chats
-        SET
-          name = ?,
-          updated_at = ?,
-          online = ?
-        WHERE chat_id = ?
-        `,
-        name,
-        now,
-        online ? 1 : 0,
-        chatId
-      );
-    } else {
-      this.ctx.storage.sql.exec(
-        `
-        INSERT INTO chats
-          (chat_id, name, created_at, updated_at, online)
-        VALUES
-          (?, ?, ?, ?, ?)
-        `,
-        chatId,
-        name,
-        now,
-        now,
-        online ? 1 : 0
-      );
-    }
-  }
-
-  saveMessage(chatId, sender, name, text) {
-    const messageId = crypto.randomUUID();
-    const now = Date.now();
-
-    this.ctx.storage.sql.exec(
-      `
-      INSERT INTO messages
-        (message_id, chat_id, sender, name, text, created_at)
-      VALUES
-        (?, ?, ?, ?, ?, ?)
-      `,
-      messageId,
-      chatId,
-      sender,
-      name,
-      text,
-      now
-    );
-
-    this.ctx.storage.sql.exec(
-      `
-      UPDATE chats
-      SET updated_at = ?
-      WHERE chat_id = ?
-      `,
-      now,
-      chatId
-    );
-
-    return {
-      messageId,
-      chatId,
-      sender,
-      name,
-      text,
-      time: new Date(now).toISOString(),
-    };
   }
 
   async webSocketMessage(ws, raw) {
-    let d;
+    let data;
 
     try {
-      d =
-        typeof raw === "string"
-          ? JSON.parse(raw)
-          : JSON.parse(new TextDecoder().decode(raw));
+      data = JSON.parse(raw);
     } catch {
       return;
     }
 
-    const current =
-      ws.deserializeAttachment() || {};
+    const current = ws.deserializeAttachment() || {};
 
-    // =========================
-    // JOIN
-    // =========================
+    /*
+     * =========================
+     * JOIN
+     * =========================
+     */
 
-    if (d.type === "join") {
+    if (data.type === "join") {
       const role =
-        d.role === "owner"
+        data.role === "owner"
           ? "owner"
           : "visitor";
 
-      const name = String(
-        d.name || "Pengunjung"
-      )
-        .trim()
-        .slice(0, 40);
-
-      // =========================
-      // OWNER LOGIN
-      // =========================
-
+      /*
+       * OWNER
+       */
       if (role === "owner") {
-        const supplied = String(
-          d.ownerKey || ""
-        );
+        const supplied = String(data.ownerKey || "");
+        const expected = String(this.env.OWNER_KEY || "");
 
-        const expected = String(
-          this.env.OWNER_KEY || ""
-        );
-
-        if (
-          !expected ||
-          supplied !== expected
-        ) {
+        if (!expected || supplied !== expected) {
           this.send(ws, {
             type: "auth_error",
             message:
-              "OWNER_KEY salah atau belum diatur di Cloudflare.",
+              "OWNER_KEY salah atau belum diatur di Cloudflare."
           });
 
           try {
-            ws.close(
-              1008,
-              "Unauthorized"
-            );
+            ws.close(1008, "Unauthorized");
           } catch {}
 
           return;
@@ -331,226 +121,244 @@ export class ChatHub extends DurableObject {
         ws.serializeAttachment({
           role: "owner",
           chatId: "",
-          name: "Owner",
+          name: "Owner"
         });
 
-        // Kirim semua chat yang pernah ada.
-        const chats =
-          this.getAllChats();
+        /*
+         * Kirim daftar chat yang sudah ada
+         */
+        const chats = await this.listChats();
 
         for (const chat of chats) {
           this.send(ws, {
             type: "chat_available",
-            ...chat,
+            ...chat
           });
         }
 
         this.send(ws, {
-          type: "owner_ready",
+          type: "owner_ready"
         });
 
         return;
       }
 
-      // =========================
-      // VISITOR LOGIN
-      // =========================
+      /*
+       * VISITOR
+       *
+       * ID dikirim oleh browser.
+       * Contoh:
+       * VIS-A1B2C3D4
+       */
 
-      let chatId = String(
-        d.chatId || ""
-      ).trim();
+      const chatId = String(
+        data.chatId || crypto.randomUUID()
+      )
+        .trim()
+        .slice(0, 80);
 
-      // Chat baru
-      if (!chatId) {
-        chatId = crypto.randomUUID();
-      }
-
-      const existing =
-        this.getChat(chatId);
-
-      this.saveChat(
-        chatId,
-        name,
-        true
-      );
+      const name = String(
+        data.name || "Pengunjung"
+      )
+        .trim()
+        .slice(0, 40);
 
       ws.serializeAttachment({
         role: "visitor",
         chatId,
-        name,
+        name
       });
 
+      const existing = await this.getChat(chatId);
+
+      const chat = {
+        chatId,
+        name,
+        online: true,
+        updated: Date.now()
+      };
+
+      await this.saveChat(chat);
+
+      /*
+       * Kirim ID ke pengunjung
+       */
       this.send(ws, {
         type: "joined",
-        chatId,
-        name,
-        returning: Boolean(existing),
+        chatId
       });
 
-      // Kirim riwayat maksimal 100 pesan.
-      const history =
-        this.getHistory(
-          chatId,
-          100
-        );
+      /*
+       * Jika chat sebelumnya ada,
+       * kirim riwayatnya.
+       */
+      if (existing?.messages?.length) {
+        for (const message of existing.messages) {
+          this.send(ws, {
+            type: "message",
+            chatId,
+            sender: message.sender,
+            name: message.name,
+            text: message.text,
+            time: message.time,
+            messageId: message.messageId
+          });
+        }
+      }
 
-      this.send(ws, {
-        type: "history",
-        chatId,
-        messages: history,
-      });
-
-      // Beri tahu owner.
+      /*
+       * Beritahu owner bahwa visitor online.
+       */
       this.broadcast(
         {
           type: existing
             ? "chat_status"
             : "chat_new",
+
           chatId,
           name,
-          online: true,
-          updatedAt: Date.now(),
+          online: true
         },
-        (a) => a.role === "owner"
+        a => a.role === "owner"
       );
 
       return;
     }
 
-    // =========================
-    // OWNER REQUEST HISTORY
-    // =========================
-
-    if (
-      current.role === "owner" &&
-      d.type === "history"
-    ) {
-      const chatId = String(
-        d.chatId || ""
-      ).trim();
-
-      if (!chatId) return;
-
-      const chat =
-        this.getChat(chatId);
-
-      if (!chat) {
-        this.send(ws, {
-          type: "history",
-          chatId,
-          messages: [],
-        });
-
-        return;
-      }
-
-      const history =
-        this.getHistory(
-          chatId,
-          500
-        );
-
-      this.send(ws, {
-        type: "history",
-        chatId,
-        messages: history,
-      });
-
-      return;
-    }
-
-    // =========================
-    // VISITOR MESSAGE
-    // =========================
+    /*
+     * =========================
+     * VISITOR MESSAGE
+     * =========================
+     */
 
     if (
       current.role === "visitor" &&
-      d.type === "message"
+      data.type === "message"
     ) {
-      const text = String(
-        d.text || ""
-      )
+      const text = String(data.text || "")
         .trim()
         .slice(0, 2000);
 
-      if (!text || !current.chatId) {
-        return;
+      if (!text) return;
+
+      const chatId = current.chatId;
+
+      const chat =
+        (await this.getChat(chatId)) || {
+          chatId,
+          name: current.name || "Pengunjung",
+          messages: []
+        };
+
+      const message = {
+        messageId: crypto.randomUUID(),
+        sender: "visitor",
+        name: current.name || "Pengunjung",
+        text,
+        time: new Date().toISOString()
+      };
+
+      chat.name = current.name || chat.name;
+      chat.online = true;
+      chat.updated = Date.now();
+
+      chat.messages ||= [];
+      chat.messages.push(message);
+
+      /*
+       * Maksimal 100 pesan per chat.
+       */
+      if (chat.messages.length > 100) {
+        chat.messages =
+          chat.messages.slice(-100);
       }
 
-      this.saveChat(
-        current.chatId,
-        current.name || "Pengunjung",
-        true
-      );
+      await this.saveChat(chat);
 
-      const message =
-        this.saveMessage(
-          current.chatId,
-          "visitor",
-          current.name ||
-            "Pengunjung",
-          text
-        );
-
+      /*
+       * Kirim ke owner dan visitor.
+       */
       this.broadcast(
         {
           type: "message",
-          ...message,
+          chatId,
+          ...message
         },
-        (a) =>
+        a =>
           a.role === "owner" ||
           (
             a.role === "visitor" &&
-            a.chatId === current.chatId
+            a.chatId === chatId
           )
       );
 
       return;
     }
 
-    // =========================
-    // OWNER MESSAGE
-    // =========================
+    /*
+     * =========================
+     * OWNER MESSAGE
+     * =========================
+     */
 
     if (
       current.role === "owner" &&
-      d.type === "message"
+      data.type === "message"
     ) {
       const chatId = String(
-        d.chatId || ""
+        data.chatId || ""
       ).trim();
 
       const text = String(
-        d.text || ""
+        data.text || ""
       )
         .trim()
         .slice(0, 2000);
 
-      if (!chatId || !text) {
-        return;
-      }
+      if (!chatId || !text) return;
 
-      const chat =
-        this.getChat(chatId);
+      const chat = await this.getChat(chatId);
 
       if (!chat) {
+        this.send(ws, {
+          type: "error",
+          message: "Chat tidak ditemukan."
+        });
+
         return;
       }
 
-      const message =
-        this.saveMessage(
-          chatId,
-          "owner",
-          "Owner",
-          text
-        );
+      const message = {
+        messageId: crypto.randomUUID(),
+        sender: "owner",
+        name: "Owner",
+        text,
+        time: new Date().toISOString()
+      };
 
+      chat.messages ||= [];
+      chat.messages.push(message);
+
+      if (chat.messages.length > 100) {
+        chat.messages =
+          chat.messages.slice(-100);
+      }
+
+      chat.updated = Date.now();
+
+      await this.saveChat(chat);
+
+      /*
+       * Kirim ke visitor yang sesuai
+       * dan owner.
+       */
       this.broadcast(
         {
           type: "message",
-          ...message,
+          chatId,
+          ...message
         },
-        (a) =>
+        a =>
           a.role === "owner" ||
           (
             a.role === "visitor" &&
@@ -562,12 +370,52 @@ export class ChatHub extends DurableObject {
     }
   }
 
-  webSocketClose(
-    ws,
-    code,
-    reason,
-    wasClean
-  ) {
+  /*
+   * =========================
+   * STORAGE
+   * =========================
+   */
+
+  async getChat(chatId) {
+    return await this.ctx.storage.get(
+      `chat:${chatId}`
+    );
+  }
+
+  async saveChat(chat) {
+    await this.ctx.storage.put(
+      `chat:${chat.chatId}`,
+      chat
+    );
+  }
+
+  async listChats() {
+    const result =
+      await this.ctx.storage.list({
+        prefix: "chat:"
+      });
+
+    const chats = [];
+
+    for (const value of result.values()) {
+      chats.push({
+        chatId: value.chatId,
+        name: value.name,
+        online: !!value.online,
+        updated: value.updated || 0
+      });
+    }
+
+    chats.sort(
+      (a, b) =>
+        (b.updated || 0) -
+        (a.updated || 0)
+    );
+
+    return chats;
+  }
+
+  webSocketClose(ws) {
     const attachment =
       ws.deserializeAttachment() || {};
 
@@ -575,41 +423,35 @@ export class ChatHub extends DurableObject {
       attachment.role === "visitor" &&
       attachment.chatId
     ) {
-      const chat =
-        this.getChat(
-          attachment.chatId
-        );
-
-      if (chat) {
-        this.ctx.storage.sql.exec(
-          `
-          UPDATE chats
-          SET
-            online = 0,
-            updated_at = ?
-          WHERE chat_id = ?
-          `,
-          Date.now(),
-          attachment.chatId
-        );
-
-        this.broadcast(
-          {
-            type: "chat_status",
-            chatId:
-              attachment.chatId,
-            name:
-              attachment.name ||
-              chat.name,
-            online: false,
-          },
-          (x) => x.role === "owner"
-        );
-      }
+      this.markOffline(
+        attachment.chatId,
+        attachment.name
+      );
     }
   }
 
   webSocketError(ws) {
     this.webSocketClose(ws);
+  }
+
+  async markOffline(chatId, name) {
+    const chat = await this.getChat(chatId);
+
+    if (!chat) return;
+
+    chat.online = false;
+    chat.updated = Date.now();
+
+    await this.saveChat(chat);
+
+    this.broadcast(
+      {
+        type: "chat_status",
+        chatId,
+        name,
+        online: false
+      },
+      a => a.role === "owner"
+    );
   }
 }
