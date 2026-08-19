@@ -1,23 +1,11 @@
-# WebChat v5
+# WebChat Cloudflare
 
-Cloudflare Worker + Durable Object SQLite + WebSocket.
+Upload all files to GitHub.
 
-## Cloudflare
-Build command: kosong
-Deploy command:
-npx wrangler deploy
+Cloudflare Build command: kosong
+Deploy command: `npx wrangler deploy`
 
-Set secret:
-npx wrangler secret put OWNER_KEY
+Create Worker Secret `OWNER_KEY` in Cloudflare.
 
-## Termux
-Jangan gunakan `npm install` biasa jika workerd memicu error Android.
-
-Install WebSocket client saja:
-npm install ws --ignore-scripts
-
-Run:
-SERVER='https://NAMA.workers.dev' OWNER_KEY='RAHASIA' node owner.js
-
-## GitHub
-Upload seluruh isi paket. Jangan memasukkan node_modules.
+For Termux owner client only: `npm install --no-save --ignore-scripts ws`
+Then: `SERVER='https://YOUR-WORKER.workers.dev' OWNER_KEY='YOUR_SECRET' node owner.js`
