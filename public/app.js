@@ -10,22 +10,13 @@ const joinEl = $("join");
 const formEl = $("form");
 
 let ws = null;
-let reconnectTimer = null;
 let joined = false;
-let manuallyJoined = false;
+let visitorName = "";
+let chatId = "";
 
-let visitorName =
-  localStorage.getItem("webchat_name") || "";
-
-let chatId =
-  localStorage.getItem("webchat_chat_id") || "";
-
-if (visitorName) {
-  nameEl.value = visitorName;
-}
-
-function setStatus(text) {
+function status(text) {
   statusEl.textContent = text;
+  console.log("[WEBCHAT]", text);
 }
 
 function wsUrl() {
@@ -36,40 +27,34 @@ function wsUrl() {
 }
 
 function connect() {
-  if (
-    ws &&
-    (
-      ws.readyState === WebSocket.OPEN ||
-      ws.readyState === WebSocket.CONNECTING
-    )
-  ) {
-    return;
-  }
-
-  setStatus("Menghubungkan...");
+  status("Menghubungkan WebSocket...");
 
   ws = new WebSocket(wsUrl());
 
-  ws.addEventListener("open", () => {
-    setStatus("Terhubung");
+  ws.onopen = () => {
+    console.log("[WS] OPEN");
+    status("WebSocket terhubung");
 
-    if (manuallyJoined && visitorName) {
-      sendJoin();
-    }
-  });
+    /*
+     * Jangan join otomatis.
+     * Tunggu tombol Masuk Chat.
+     */
+  };
 
-  ws.addEventListener("message", event => {
+  ws.onmessage = event => {
+    console.log("[WS] MESSAGE:", event.data);
+
     let data;
 
     try {
       data = JSON.parse(event.data);
     } catch {
+      status("Server mengirim data tidak valid.");
       return;
     }
 
-    /*
-     * VISITOR JOIN BERHASIL
-     */
+    console.log("[SERVER]", data);
+
     if (data.type === "joined") {
       joined = true;
 
@@ -89,149 +74,84 @@ function connect() {
       welcomeEl.classList.add("hidden");
       chatEl.classList.remove("hidden");
 
-      renderHistory(data.history || []);
+      messagesEl.innerHTML = "";
 
-      setStatus("Online");
+      for (const message of data.history || []) {
+        addMessage(message);
+      }
+
+      status("Online");
 
       inputEl.focus();
 
       return;
     }
 
-    /*
-     * PESAN
-     */
     if (data.type === "message") {
-
-      /*
-       * Jangan tampilkan pesan visitor dua kali.
-       */
-      if (
-        data.sender === "visitor" &&
-        data.chatId === chatId &&
-        data.name === visitorName
-      ) {
-        const pending =
-          document.querySelector(
-            `[data-client-id="${CSS.escape(
-              String(data.id)
-            )}"]`
-          );
-
-        if (pending) {
-          pending.removeAttribute("data-client-id");
-          return;
-        }
-      }
-
-      addMessage(data, false);
-
+      addMessage(data);
       return;
     }
 
-    /*
-     * ERROR
-     */
     if (data.type === "error") {
-      setStatus(
-        data.message || "Terjadi kesalahan."
-      );
-
+      status("ERROR: " + data.message);
       return;
     }
 
-    /*
-     * OWNER AUTH ERROR
-     * Tidak seharusnya muncul di visitor.
-     */
-    if (data.type === "auth_error") {
-      setStatus("Server menolak koneksi.");
-
+    if (data.type === "test") {
+      status("WebSocket hidup, tetapi server masih versi TEST.");
       return;
     }
-  });
+  };
 
-  ws.addEventListener("close", () => {
-    joined = false;
+  ws.onerror = error => {
+    console.error("[WS] ERROR:", error);
+    status("WebSocket ERROR");
+  };
 
-    setStatus(
-      manuallyJoined
-        ? "Offline — mencoba kembali..."
-        : "Terputus"
+  ws.onclose = event => {
+    console.log(
+      "[WS] CLOSE:",
+      event.code,
+      event.reason
     );
 
-    clearTimeout(reconnectTimer);
+    joined = false;
 
-    if (manuallyJoined) {
-      reconnectTimer = setTimeout(
-        connect,
-        2500
-      );
-    }
-  });
+    status(
+      `WebSocket terputus (${event.code})`
+    );
 
-  ws.addEventListener("error", () => {
-    setStatus("Koneksi error.");
-  });
+    /*
+     * Coba reconnect.
+     */
+    setTimeout(() => {
+      if (!ws || ws.readyState === WebSocket.CLOSED) {
+        connect();
+      }
+    }, 3000);
+  };
 }
 
-function sendJoin() {
-  if (
-    !ws ||
-    ws.readyState !== WebSocket.OPEN ||
-    !visitorName
-  ) {
-    return;
-  }
-
-  ws.send(JSON.stringify({
-    type: "join",
-    role: "visitor",
-    chatId: chatId || "",
-    name: visitorName
-  }));
-}
-
-function addMessage(message, local = false) {
-  const box =
-    document.createElement("div");
+function addMessage(message) {
+  const box = document.createElement("div");
 
   box.className =
-    `msg ${
-      message.sender === "visitor"
-        ? "mine"
-        : "theirs"
-    }`;
+    message.sender === "visitor"
+      ? "msg mine"
+      : "msg theirs";
 
-  /*
-   * ID server digunakan supaya
-   * pesan lokal tidak muncul dua kali.
-   */
-  if (local && message.id) {
-    box.dataset.clientId =
-      String(message.id);
-  }
-
-  const meta =
-    document.createElement("div");
-
+  const meta = document.createElement("div");
   meta.className = "meta";
-
   meta.textContent =
     message.sender === "visitor"
       ? "Kamu"
       : "Owner";
 
-  const text =
-    document.createElement("div");
-
+  const text = document.createElement("div");
   text.className = "text";
+  text.textContent = message.text || "";
 
-  text.textContent =
-    message.text || "";
-
-  box.appendChild(meta);
-  box.appendChild(text);
+  box.append(meta, text);
 
   messagesEl.appendChild(box);
 
@@ -239,111 +159,85 @@ function addMessage(message, local = false) {
     messagesEl.scrollHeight;
 }
 
-function renderHistory(history) {
-  messagesEl.innerHTML = "";
-
-  for (const message of history) {
-    addMessage(message, false);
-  }
-}
-
 /*
- * TOMBOL MASUK CHAT
+ * MASUK CHAT
  */
 joinEl.addEventListener("click", () => {
-  const value =
-    nameEl.value.trim();
+  const value = nameEl.value.trim();
+
+  console.log("[JOIN BUTTON]", value);
 
   if (!value) {
+    status("Nama belum diisi.");
     nameEl.focus();
     return;
   }
 
-  visitorName =
-    value.slice(0, 40);
+  if (!ws || ws.readyState !== WebSocket.OPEN) {
+    status("WebSocket belum terhubung.");
 
-  manuallyJoined = true;
-
-  localStorage.setItem(
-    "webchat_name",
-    visitorName
-  );
-
-  if (
-    ws &&
-    ws.readyState === WebSocket.OPEN
-  ) {
-    sendJoin();
-  } else {
+    /*
+     * Coba koneksi lagi.
+     */
     connect();
+
+    return;
+  }
+
+  visitorName = value.slice(0, 40);
+
+  /*
+   * Kalau belum punya ID,
+   * server akan membuat ID.
+   */
+  if (!chatId) {
+    chatId = "";
+  }
+
+  status("Mengirim data nama...");
+
+  ws.send(JSON.stringify({
+    type: "join",
+    role: "visitor",
+    chatId: chatId,
+    name: visitorName
+  }));
+});
+
+nameEl.addEventListener("keydown", event => {
+  if (event.key === "Enter") {
+    event.preventDefault();
+    joinEl.click();
   }
 });
 
 /*
- * ENTER DI KOLOM NAMA
- */
-nameEl.addEventListener(
-  "keydown",
-  event => {
-    if (event.key === "Enter") {
-      event.preventDefault();
-      joinEl.click();
-    }
-  }
-);
-
-/*
  * KIRIM PESAN
  */
-formEl.addEventListener(
-  "submit",
-  event => {
-    event.preventDefault();
+formEl.addEventListener("submit", event => {
+  event.preventDefault();
 
-    const messageText =
-      inputEl.value.trim();
+  const message = inputEl.value.trim();
 
-    if (!messageText) {
-      return;
-    }
+  if (!message) return;
 
-    if (!joined) {
-      setStatus(
-        "Belum masuk chat."
-      );
-      return;
-    }
-
-    if (
-      !ws ||
-      ws.readyState !== WebSocket.OPEN
-    ) {
-      setStatus(
-        "Koneksi terputus."
-      );
-      return;
-    }
-
-    /*
-     * Server yang membuat ID pesan.
-     * Jadi jangan membuat ID palsu
-     * di browser.
-     */
-    ws.send(JSON.stringify({
-      type: "message",
-      text: messageText
-    }));
-
-    inputEl.value = "";
-    inputEl.focus();
+  if (!joined) {
+    status("Belum masuk chat.");
+    return;
   }
-);
 
-/*
- * Jangan otomatis join hanya karena
- * nama tersimpan.
- *
- * Pengunjung tetap bisa melihat
- * halaman nama terlebih dahulu.
- */
+  if (!ws || ws.readyState !== WebSocket.OPEN) {
+    status("WebSocket terputus.");
+    return;
+  }
+
+  ws.send(JSON.stringify({
+    type: "message",
+    text: message
+  }));
+
+  inputEl.value = "";
+  inputEl.focus();
+});
+
 connect();
