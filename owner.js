@@ -5,9 +5,7 @@ const SERVER = process.env.SERVER;
 const OWNER_KEY = process.env.OWNER_KEY;
 
 if (!SERVER || !OWNER_KEY) {
-  console.error(
-    "Gunakan: SERVER='https://DOMAIN.workers.dev' OWNER_KEY='rahasia' node owner.js"
-  );
+  console.error("Gunakan: SERVER='https://...workers.dev' OWNER_KEY='rahasia' node owner.js");
   process.exit(1);
 }
 
@@ -21,10 +19,6 @@ let ws = null;
 let active = null;
 const chats = new Map();
 
-function printPrompt() {
-  rl.prompt();
-}
-
 function connect() {
   const base = SERVER.replace(/^http/, "ws");
   const url = new URL("/ws", base);
@@ -32,107 +26,117 @@ function connect() {
   ws = new WebSocket(url);
 
   ws.on("open", () => {
+    console.log("Terhubung ke Cloudflare.");
     ws.send(JSON.stringify({
       type: "join",
       role: "owner",
       ownerKey: OWNER_KEY
     }));
-
-    console.log("Terhubung ke Cloudflare.");
   });
 
   ws.on("message", raw => {
-    let d;
-    try { d = JSON.parse(raw); } catch { return; }
-
-    if (d.type === "owner_ready") {
-      console.log("Owner siap. Chat tersimpan akan tetap tersedia.");
-      printPrompt();
+    let data;
+    try {
+      data = JSON.parse(raw.toString());
+    } catch {
       return;
     }
 
-    if (d.type === "auth_error") {
-      console.error("LOGIN OWNER GAGAL:", d.message);
+    if (data.type === "owner_ready") {
+      console.log("Owner siap.");
+      console.log("Perintah: list | use <ID> | history <ID> | reply <pesan> | /reply <ID> <pesan> | exit");
+      rl.prompt();
+      return;
+    }
+
+    if (data.type === "auth_error") {
+      console.error("LOGIN OWNER GAGAL:", data.message);
       process.exit(1);
     }
 
-    if (d.type === "chat_available" || d.type === "chat_new") {
-      chats.set(d.chatId, {
-        name: d.name,
-        online: d.online,
-        updated: d.updated
+    if (data.type === "chat_available") {
+      chats.set(data.chatId, {
+        name: data.name || "Pengunjung",
+        online: !!data.online
       });
-
-      console.log(
-        `\n[CHAT ${d.chatId}] ${d.online ? "🟢" : "🔴"} ${d.name}`
-      );
-
-      if (d.type === "chat_new") {
-        console.log("Gunakan: use " + d.chatId);
-      }
-
-      printPrompt();
+      console.log(`\n[CHAT ${data.chatId}] ${data.online ? "🟢" : "🔴"} ${data.name || "Pengunjung"}`);
+      rl.prompt();
       return;
     }
 
-    if (d.type === "chat_status") {
-      const old = chats.get(d.chatId) || {};
-
-      chats.set(d.chatId, {
+    if (data.type === "chat_status") {
+      const old = chats.get(data.chatId) || {};
+      chats.set(data.chatId, {
         ...old,
-        name: d.name || old.name,
-        online: d.online
+        name: data.name || old.name || "Pengunjung",
+        online: !!data.online
       });
-
-      console.log(
-        `\n[STATUS] ${d.name || old.name || d.chatId}: ${
-          d.online ? "ONLINE" : "OFFLINE"
-        }`
-      );
-
-      printPrompt();
+      console.log(`\n[STATUS] ${data.chatId}: ${data.online ? "ONLINE" : "OFFLINE"}`);
+      rl.prompt();
       return;
     }
 
-    if (d.type === "message") {
-      const marker = d.sender === "visitor" ? "PENGUNJUNG" : "OWNER";
-      const name =
-        d.name ||
-        chats.get(d.chatId)?.name ||
-        d.chatId;
+    if (data.type === "chat_list") {
+      chats.clear();
+      for (const c of data.chats || []) {
+        chats.set(c.chatId, c);
+      }
+      list();
+      rl.prompt();
+      return;
+    }
 
-      chats.set(d.chatId, {
-        ...(chats.get(d.chatId) || {}),
+    if (data.type === "history") {
+      console.log(`\n--- RIWAYAT ${data.chatId} ---`);
+      for (const m of data.history || []) {
+        console.log(`[${m.name}] [${m.sender === "visitor" ? "PENGUNJUNG" : "OWNER"}] ${m.text}`);
+      }
+      console.log("--- AKHIR RIWAYAT ---");
+      rl.prompt();
+      return;
+    }
+
+    if (data.type === "message") {
+      const name = data.name || chats.get(data.chatId)?.name || "Pengunjung";
+
+      chats.set(data.chatId, {
+        ...(chats.get(data.chatId) || {}),
         name,
-        online: d.sender === "visitor"
-          ? true
-          : (chats.get(d.chatId)?.online ?? false)
+        online: data.sender === "visitor" ? true : (chats.get(data.chatId)?.online ?? true)
       });
 
-      console.log(
-        `\n[${d.chatId}] ${name} [${marker}] ${d.text}`
-      );
-
-      if (d.sender === "visitor") {
-        active = d.chatId;
-      }
-
-      printPrompt();
+      console.log(`\n[${data.chatId}] ${name} [${data.sender === "visitor" ? "PENGUNJUNG" : "OWNER"}] ${data.text}`);
+      active = data.chatId;
+      rl.prompt();
       return;
     }
   });
 
   ws.on("close", () => {
-    console.log("\nKoneksi terputus. Mencoba reconnect...");
+    console.log("\nKoneksi terputus. Reconnect 3 detik...");
     setTimeout(connect, 3000);
   });
 
-  ws.on("error", err => {
-    console.log("\nWS:", err.message);
+  ws.on("error", error => {
+    console.log("\nWS:", error.message);
   });
 }
 
+function list() {
+  console.log("\nDaftar chat:");
+  if (!chats.size) {
+    console.log("(belum ada chat)");
+    return;
+  }
+
+  for (const [id, chat] of chats) {
+    console.log(`${id} | ${chat.online ? "🟢" : "🔴"} | ${chat.name || "Pengunjung"}`);
+  }
+}
+
 function send(chatId, text) {
+  if (!chatId || !text) return;
+
   if (!ws || ws.readyState !== WebSocket.OPEN) {
     console.log("Belum terhubung.");
     return;
@@ -145,47 +149,9 @@ function send(chatId, text) {
   }));
 }
 
-function requestHistory(chatId) {
-  if (!ws || ws.readyState !== WebSocket.OPEN) {
-    console.log("Belum terhubung.");
-    return;
-  }
-
-  ws.send(JSON.stringify({
-    type: "history",
-    chatId
-  }));
-
-  console.log("Meminta riwayat chat:", chatId);
-}
-
-function list() {
-  console.log("\nDaftar chat tersimpan:");
-
-  if (!chats.size) {
-    console.log("(belum ada chat)");
-    return;
-  }
-
-  for (const [id, c] of chats) {
-    console.log(
-      `${id} | ${c.online ? "🟢" : "🔴"} | ${c.name || "Pengunjung"}`
-    );
-  }
-}
-
-console.log(`
-======================================
-       WEBCHAT OWNER v4
-======================================
-Perintah:
-  list
-  use <ID>
-  history <ID>
-  reply <pesan>
-  /reply <ID> <pesan>
-  exit
-`);
+console.log("======================================");
+console.log("       WEBCHAT OWNER v5");
+console.log("======================================");
 
 connect();
 
@@ -193,35 +159,60 @@ rl.on("line", line => {
   const x = line.trim();
 
   if (!x) {
-    printPrompt();
+    rl.prompt();
     return;
   }
 
   if (x === "list") {
-    list();
-  } else if (x.startsWith("use ")) {
-    active = x.slice(4).trim();
-    console.log("Chat aktif:", active);
-    requestHistory(active);
-  } else if (x.startsWith("history ")) {
-    requestHistory(x.slice(8).trim());
-  } else if (x.startsWith("reply ")) {
-    if (!active) {
-      console.log("Pilih chat dulu: use <ID>");
-    } else {
-      send(active, x.slice(6));
+    if (ws?.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: "list" }));
     }
-  } else if (x.startsWith("/reply ")) {
-    const p = x.slice(7).trim().split(" ");
-    const id = p.shift();
-    send(id, p.join(" "));
-  } else if (x === "exit") {
-    process.exit(0);
-  } else {
-    console.log(
-      "Perintah: list | use <ID> | history <ID> | reply <pesan> | /reply <ID> <pesan> | exit"
-    );
+    return;
   }
 
-  printPrompt();
+  if (x.startsWith("use ")) {
+    active = x.slice(4).trim();
+    console.log("Chat aktif:", active);
+    if (ws?.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({
+        type: "history",
+        chatId: active
+      }));
+    }
+    return;
+  }
+
+  if (x.startsWith("history ")) {
+    const id = x.slice(8).trim();
+    if (ws?.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({
+        type: "history",
+        chatId: id
+      }));
+    }
+    return;
+  }
+
+  if (x.startsWith("reply ")) {
+    if (!active) {
+      console.log("Pilih chat dahulu: use <ID>");
+    } else {
+      send(active, x.slice(6).trim());
+    }
+    return;
+  }
+
+  if (x.startsWith("/reply ")) {
+    const parts = x.slice(7).trim().split(/\s+/);
+    const id = parts.shift();
+    send(id, parts.join(" "));
+    return;
+  }
+
+  if (x === "exit") {
+    process.exit(0);
+  }
+
+  console.log("Perintah: list | use <ID> | history <ID> | reply <pesan> | /reply <ID> <pesan> | exit");
+  rl.prompt();
 });

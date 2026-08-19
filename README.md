@@ -1,59 +1,23 @@
-# WebChat v4 — Persistent History
+# WebChat v5
 
-Versi ini menyimpan chat di SQLite Durable Object.
-
-## Struktur
-
-- `src/index.js` — Worker + Durable Object + SQLite
-- `public/index.html` — halaman chat
-- `public/style.css` — tema Linux/terminal
-- `public/app.js` — WebSocket visitor
-- `owner.js` — console owner
-- `wrangler.json` — konfigurasi Cloudflare
-- `package.json` — dependency
+Cloudflare Worker + Durable Object SQLite + WebSocket.
 
 ## Cloudflare
-
+Build command: kosong
 Deploy command:
-
-```bash
 npx wrangler deploy
-```
 
-Pastikan Secret dibuat:
-
-```bash
+Set secret:
 npx wrangler secret put OWNER_KEY
-```
 
-Jangan menaruh nilai OWNER_KEY di GitHub.
+## Termux
+Jangan gunakan `npm install` biasa jika workerd memicu error Android.
 
-## Owner di Termux
-
-Install hanya dependency `ws` untuk owner:
-
-```bash
+Install WebSocket client saja:
 npm install ws --ignore-scripts
-```
 
-Kemudian:
+Run:
+SERVER='https://NAMA.workers.dev' OWNER_KEY='RAHASIA' node owner.js
 
-```bash
-SERVER='https://DOMAIN.workers.dev' OWNER_KEY='rahasia' node owner.js
-```
-
-Jangan menjalankan `npm install` jika Termux mencoba memasang `workerd`; Android tidak didukung oleh binary workerd. `owner.js` hanya membutuhkan `ws`.
-
-## Riwayat
-
-ID pengunjung disimpan di localStorage browser. Pesan disimpan di SQLite Durable Object, sehingga pesan tidak dihapus ketika pengunjung menutup halaman atau Worker melakukan restart.
-
-Owner:
-
-```text
-list
-use <ID>
-history <ID>
-reply <pesan>
-/reply <ID> <pesan>
-```
+## GitHub
+Upload seluruh isi paket. Jangan memasukkan node_modules.

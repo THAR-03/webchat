@@ -1,13 +1,9 @@
 {
-  "name": "webchat",
+  "name": "webchat-cloudflare",
   "private": true,
   "type": "module",
-  "scripts": {
-    "deploy": "wrangler deploy"
-  },
   "dependencies": {
-    "wrangler": "^4.124.0",
-    "ws": "^8.18.3"
-  },
-  "devDependencies": {}
+    "wrangler": "4.124.0",
+    "ws": "8.18.3"
+  }
 }
