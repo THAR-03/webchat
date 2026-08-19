@@ -3,12 +3,25 @@
   "name": "webchat",
   "main": "src/index.js",
   "compatibility_date": "2026-08-19",
-  "compatibility_flags": ["nodejs_compat"],
-  "assets": {"directory": "./public", "binding": "ASSETS"},
-  "durable_objects": {"bindings": [{"name": "CHAT_HUB", "class_name": "ChatHub"}]},
+  "compatibility_flags": [
+    "nodejs_compat"
+  ],
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS"
+  },
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "CHAT_HUB",
+        "class_name": "ChatHub"
+      }
+    ]
+  },
   "exports": {
-  "ChatHub": {
-    "type": "durable-object",
-    "storage": "sqlite"
+    "ChatHub": {
+      "type": "durable-object",
+      "storage": "sqlite"
+    }
   }
 }
