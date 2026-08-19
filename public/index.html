@@ -1,1 +1,22 @@
-<!doctype html><html lang="id"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Chat dengan Admin</title><link rel="stylesheet" href="/style.css"></head><body><main class="app"><header><div><h1>Chat dengan Admin</h1><p>Kami siap membantu Anda.</p></div><span id="status">Offline</span></header><section id="nameBox" class="card"><label for="name">Nama</label><input id="name" maxlength="40" placeholder="Masukkan nama Anda"><button id="start">Mulai Chat</button></section><section id="chatBox" class="chat hidden"><div id="messages" class="messages"></div><form id="form"><input id="message" maxlength="2000" autocomplete="off" placeholder="Tulis pesan..."><button>Kirim</button></form></section></main><script src="/app.js"></script></body></html>
+<div>
+  ID Anda:
+  <strong id="visitor-id">...</strong>
+</div>
+
+<input
+  id="name"
+  placeholder="Nama Anda"
+/>
+
+<div id="messages"></div>
+
+<input
+  id="message"
+  placeholder="Tulis pesan..."
+/>
+
+<button id="send">
+  Kirim
+</button>
+
+<script src="/app.js"></script>
