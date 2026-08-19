@@ -1,4 +1,3 @@
-cat > package.json <<'EOF'
 {
   "name": "webchat",
   "version": "1.0.0",
@@ -14,4 +13,3 @@ cat > package.json <<'EOF'
     "wrangler": "^4.124.0"
   }
 }
-EOF
