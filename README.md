@@ -1,27 +1,11 @@
-# WebChat Cloudflare + Termux
+# WebChat Cloudflare
 
-Chat publik berjalan di Cloudflare Workers + Durable Objects.
-Owner membalas dari Termux menggunakan owner.js.
+Upload all files to GitHub.
 
-## Cloudflare
+Cloudflare Build command: kosong
+Deploy command: `npx wrangler deploy`
 
-Build command: kosongkan / tidak perlu build command.
+Create Worker Secret `OWNER_KEY` in Cloudflare.
 
-Deploy command:
-npx wrangler deploy
-
-Set secret OWNER_KEY dari Cloudflare atau Wrangler.
-
-## Termux
-
-Node.js diperlukan untuk owner.js.
-
-Install dependency owner:
-npm install --omit=dev
-
-Jalankan:
-SERVER='https://NAMA.workers.dev' OWNER_KEY='RAHASIA' node owner.js
-
-Catatan:
-Jangan menjalankan `npm install` untuk memasang Wrangler di Termux Android.
-Deployment Wrangler dilakukan oleh Cloudflare/GitHub build.
+For Termux owner client only: `npm install --no-save --ignore-scripts ws`
+Then: `SERVER='https://YOUR-WORKER.workers.dev' OWNER_KEY='YOUR_SECRET' node owner.js`
