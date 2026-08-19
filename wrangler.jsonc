@@ -1,6 +1,6 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "webchat-termux",
+  "name": "webchat",
   "main": "src/index.js",
   "compatibility_date": "2026-08-19",
   "compatibility_flags": [
