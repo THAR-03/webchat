@@ -1,4 +1,554 @@
-const $=id=>document.getElementById(id);const nameBox=$("nameBox"),chatBox=$("chatBox"),nameInput=$("name"),messages=$("messages"),message=$("message"),status=$("status");let chatId=localStorage.getItem("chat_id")||crypto.randomUUID(),ws;
-function add(m){const d=document.createElement("div");d.className="msg "+(m.sender==="owner"?"owner":"visitor");const t=document.createElement("div");t.textContent=m.text;const tm=document.createElement("span");tm.className="time";tm.textContent=new Date(m.time).toLocaleTimeString("id-ID",{hour:"2-digit",minute:"2-digit"});d.append(t,tm);messages.appendChild(d);messages.scrollTop=messages.scrollHeight}
-function connect(){const p=location.protocol==="https:"?"wss":"ws";ws=new WebSocket(`${p}://${location.host}/ws?chat=${encodeURIComponent(chatId)}`);ws.onopen=()=>{status.textContent="Online";status.className="online";ws.send(JSON.stringify({type:"join",role:"visitor",chatId,name:localStorage.getItem("visitor_name")||"Pengunjung"}))};ws.onclose=()=>{status.textContent="Offline";status.className="";setTimeout(()=>{if(!ws||ws.readyState===3)connect()},3000)};ws.onmessage=e=>{const d=JSON.parse(e.data);if(d.type==="message"&&d.chatId===chatId)add(d)}}
-$("start").onclick=()=>{const name=nameInput.value.trim()||"Pengunjung";localStorage.setItem("visitor_name",name);localStorage.setItem("chat_id",chatId);nameBox.classList.add("hidden");chatBox.classList.remove("hidden");connect();message.focus()};$("form").onsubmit=e=>{e.preventDefault();const text=message.value.trim();if(text&&ws?.readyState===1){ws.send(JSON.stringify({type:"message",text}));message.value=""}};nameInput.value=localStorage.getItem("visitor_name")||"";
+(() => {
+  "use strict";
+
+  const SERVER =
+    window.location.origin;
+
+  const WS_URL =
+    window.location.origin
+      .replace(/^http/, "ws") +
+    "/ws";
+
+  const CHAT_STORAGE =
+    "webchat_chat_id";
+
+  const NAME_STORAGE =
+    "webchat_name";
+
+  let ws = null;
+  let chatId =
+    localStorage.getItem(
+      CHAT_STORAGE
+    ) || "";
+
+  let name =
+    localStorage.getItem(
+      NAME_STORAGE
+    ) || "";
+
+  let connected = false;
+
+  const seenMessages =
+    new Set();
+
+  // =========================
+  // ELEMENTS
+  // =========================
+
+  function createUI() {
+    document.body.innerHTML = `
+      <div class="webchat">
+        <div class="chat-header">
+          <div>
+            <h2>WebChat</h2>
+            <div id="status">
+              Menghubungkan...
+            </div>
+          </div>
+        </div>
+
+        <div
+          id="messages"
+          class="messages"
+        ></div>
+
+        <div
+          id="nameBox"
+          class="name-box"
+        >
+          <input
+            id="nameInput"
+            type="text"
+            maxlength="40"
+            placeholder="Nama Anda"
+            autocomplete="name"
+          />
+
+          <button id="saveName">
+            Mulai Chat
+          </button>
+        </div>
+
+        <div
+          id="composer"
+          class="composer"
+          style="display:none"
+        >
+          <input
+            id="messageInput"
+            type="text"
+            maxlength="2000"
+            placeholder="Tulis pesan..."
+            autocomplete="off"
+          />
+
+          <button id="sendButton">
+            Kirim
+          </button>
+        </div>
+      </div>
+    `;
+  }
+
+  createUI();
+
+  const messagesEl =
+    document.getElementById(
+      "messages"
+    );
+
+  const statusEl =
+    document.getElementById(
+      "status"
+    );
+
+  const nameBox =
+    document.getElementById(
+      "nameBox"
+    );
+
+  const nameInput =
+    document.getElementById(
+      "nameInput"
+    );
+
+  const saveName =
+    document.getElementById(
+      "saveName"
+    );
+
+  const composer =
+    document.getElementById(
+      "composer"
+    );
+
+  const messageInput =
+    document.getElementById(
+      "messageInput"
+    );
+
+  const sendButton =
+    document.getElementById(
+      "sendButton"
+    );
+
+  nameInput.value = name;
+
+  // =========================
+  // STATUS
+  // =========================
+
+  function setStatus(text) {
+    statusEl.textContent =
+      text;
+  }
+
+  // =========================
+  // ESCAPE
+  // =========================
+
+  function escapeHTML(text) {
+    const div =
+      document.createElement(
+        "div"
+      );
+
+    div.textContent = text;
+
+    return div.innerHTML;
+  }
+
+  // =========================
+  // ADD MESSAGE
+  // =========================
+
+  function addMessage(message) {
+    if (!message) return;
+
+    const messageId =
+      message.messageId ||
+      (
+        message.chatId +
+        "|" +
+        message.sender +
+        "|" +
+        message.time +
+        "|" +
+        message.text
+      );
+
+    // Mencegah pesan muncul dua kali.
+    if (
+      seenMessages.has(messageId)
+    ) {
+      return;
+    }
+
+    seenMessages.add(messageId);
+
+    const item =
+      document.createElement(
+        "div"
+      );
+
+    item.className =
+      "message " +
+      (
+        message.sender === "owner"
+          ? "owner"
+          : "visitor"
+      );
+
+    const time =
+      message.time
+        ? new Date(
+            message.time
+          ).toLocaleTimeString(
+            [],
+            {
+              hour: "2-digit",
+              minute: "2-digit",
+            }
+          )
+        : "";
+
+    item.innerHTML = `
+      <div class="message-name">
+        ${escapeHTML(
+          message.name ||
+          (
+            message.sender ===
+            "owner"
+              ? "Owner"
+              : "Anda"
+          )
+        )}
+      </div>
+
+      <div class="message-text">
+        ${escapeHTML(
+          message.text || ""
+        )}
+      </div>
+
+      <div class="message-time">
+        ${escapeHTML(time)}
+      </div>
+    `;
+
+    messagesEl.appendChild(item);
+
+    messagesEl.scrollTop =
+      messagesEl.scrollHeight;
+  }
+
+  // =========================
+  // HISTORY
+  // =========================
+
+  function loadHistory(messages) {
+    if (!Array.isArray(messages)) {
+      return;
+    }
+
+    for (const message of messages) {
+      addMessage(message);
+    }
+
+    messagesEl.scrollTop =
+      messagesEl.scrollHeight;
+  }
+
+  // =========================
+  // CONNECT
+  // =========================
+
+  function connect() {
+    setStatus(
+      "Menghubungkan..."
+    );
+
+    try {
+      ws = new WebSocket(
+        WS_URL
+      );
+    } catch (error) {
+      setStatus(
+        "Gagal membuat koneksi."
+      );
+
+      setTimeout(
+        connect,
+        3000
+      );
+
+      return;
+    }
+
+    ws.addEventListener(
+      "open",
+      () => {
+        connected = true;
+
+        setStatus(
+          "Terhubung"
+        );
+
+        ws.send(
+          JSON.stringify({
+            type: "join",
+            role: "visitor",
+            chatId,
+            name:
+              name ||
+              "Pengunjung",
+          })
+        );
+      }
+    );
+
+    ws.addEventListener(
+      "message",
+      (event) => {
+        let data;
+
+        try {
+          data =
+            JSON.parse(
+              event.data
+            );
+        } catch {
+          return;
+        }
+
+        // JOINED
+        if (
+          data.type ===
+          "joined"
+        ) {
+          chatId =
+            data.chatId;
+
+          name =
+            data.name ||
+            name ||
+            "Pengunjung";
+
+          localStorage.setItem(
+            CHAT_STORAGE,
+            chatId
+          );
+
+          localStorage.setItem(
+            NAME_STORAGE,
+            name
+          );
+
+          nameBox.style.display =
+            "none";
+
+          composer.style.display =
+            "flex";
+
+          setStatus(
+            "Terhubung"
+          );
+
+          return;
+        }
+
+        // HISTORY
+        if (
+          data.type ===
+          "history"
+        ) {
+          if (
+            data.chatId ===
+            chatId
+          ) {
+            loadHistory(
+              data.messages
+            );
+          }
+
+          return;
+        }
+
+        // MESSAGE
+        if (
+          data.type ===
+          "message"
+        ) {
+          if (
+            data.chatId ===
+            chatId
+          ) {
+            addMessage(data);
+          }
+
+          return;
+        }
+      }
+    );
+
+    ws.addEventListener(
+      "close",
+      () => {
+        connected = false;
+
+        setStatus(
+          "Terputus. Menghubungkan kembali..."
+        );
+
+        setTimeout(
+          connect,
+          2000
+        );
+      }
+    );
+
+    ws.addEventListener(
+      "error",
+      () => {
+        connected = false;
+
+        setStatus(
+          "Koneksi bermasalah..."
+        );
+      }
+    );
+  }
+
+  // =========================
+  // SEND
+  // =========================
+
+  function sendMessage() {
+    const text =
+      messageInput.value.trim();
+
+    if (!text) return;
+
+    if (
+      !ws ||
+      ws.readyState !==
+        WebSocket.OPEN
+    ) {
+      setStatus(
+        "Belum terhubung."
+      );
+
+      return;
+    }
+
+    ws.send(
+      JSON.stringify({
+        type: "message",
+        text,
+      })
+    );
+
+    messageInput.value = "";
+
+    messageInput.focus();
+  }
+
+  // =========================
+  // SAVE NAME
+  // =========================
+
+  saveName.addEventListener(
+    "click",
+    () => {
+      const value =
+        nameInput.value
+          .trim()
+          .slice(0, 40);
+
+      if (!value) {
+        alert(
+          "Masukkan nama terlebih dahulu."
+        );
+
+        return;
+      }
+
+      name = value;
+
+      localStorage.setItem(
+        NAME_STORAGE,
+        name
+      );
+
+      nameBox.style.display =
+        "none";
+
+      composer.style.display =
+        "flex";
+
+      if (
+        ws &&
+        ws.readyState ===
+          WebSocket.OPEN
+      ) {
+        ws.send(
+          JSON.stringify({
+            type: "join",
+            role: "visitor",
+            chatId,
+            name,
+          })
+        );
+      }
+    }
+  );
+
+  // =========================
+  // BUTTON
+  // =========================
+
+  sendButton.addEventListener(
+    "click",
+    sendMessage
+  );
+
+  messageInput.addEventListener(
+    "keydown",
+    (event) => {
+      if (
+        event.key === "Enter"
+      ) {
+        event.preventDefault();
+
+        sendMessage();
+      }
+    }
+  );
+
+  nameInput.addEventListener(
+    "keydown",
+    (event) => {
+      if (
+        event.key === "Enter"
+      ) {
+        event.preventDefault();
+
+        saveName.click();
+      }
+    }
+  );
+
+  // =========================
+  // START
+  // =========================
+
+  if (name) {
+    nameBox.style.display =
+      "none";
+
+    composer.style.display =
+      "flex";
+  }
+
+  connect();
+})();
