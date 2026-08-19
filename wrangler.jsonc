@@ -19,12 +19,13 @@
     ]
   },
   "exports": {
-  "ChatHub": {
-    "type": "durable-object",
-    "storage": "sqlite"
-  },
-  "ChatRoom": {
-    "type": "durable-object",
-    "state": "deleted"
+    "ChatHub": {
+      "type": "durable-object",
+      "storage": "sqlite"
+    },
+    "ChatRoom": {
+      "type": "durable-object",
+      "state": "deleted"
+    }
   }
 }
