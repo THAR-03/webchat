@@ -7,7 +7,7 @@ Versi ini memakai Cloudflare Workers + Durable Objects + WebSockets, bukan serve
 ```bash
 pkg update -y
 pkg install nodejs git -y
-git clone https://github.com/USERNAME/REPO.git
+git clone https://github.com/THAR-03/webchat.git
 cd REPO
 npm install
 npx wrangler login
@@ -21,7 +21,7 @@ Cloudflare akan memberikan URL `workers.dev`.
 Di Termux:
 
 ```bash
-SERVER='https://NAMA-WORKER.username.workers.dev' node owner.js
+SERVER='https://webchat.username.workers.dev' node owner.js
 ```
 
 Saat ini owner menggunakan ID chat. Versi lanjutan sebaiknya menambahkan dashboard owner dan autentikasi owner.
