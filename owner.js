@@ -7,16 +7,13 @@ const SERVER =
 const OWNER_KEY =
   process.env.OWNER_KEY;
 
-if (
-  !SERVER ||
-  !OWNER_KEY
-) {
+if (!SERVER || !OWNER_KEY) {
   console.error(
     "Gunakan:"
   );
 
   console.error(
-    "SERVER='https://...workers.dev' OWNER_KEY='rahasia' node owner.js"
+    "SERVER='https://webchat-anda.workers.dev' OWNER_KEY='rahasia' node owner.js"
   );
 
   process.exit(1);
@@ -26,78 +23,63 @@ const rl =
   readline.createInterface({
     input: process.stdin,
     output: process.stdout,
-    prompt: "owner> ",
+    prompt: "owner> "
   });
 
 let ws = null;
 let active = null;
 
-const chats = new Map();
+const chats =
+  new Map();
 
-// Mencegah pesan yang sama
-// ditampilkan berkali-kali.
-const seenMessages =
+const receivedMessages =
   new Set();
 
-function makeWSURL() {
+/*
+ * =========================
+ * CONNECT
+ * =========================
+ */
+
+function connect() {
   const url =
     new URL(
       "/ws",
-      SERVER
+      SERVER.replace(/^http/, "ws")
     );
 
-  url.protocol =
-    url.protocol === "https:"
-      ? "wss:"
-      : "ws:";
+  ws =
+    new WebSocket(url);
 
-  return url;
-}
+  ws.on("open", () => {
+    console.log(
+      "Terhubung ke Cloudflare."
+    );
 
-function connect() {
-  console.log(
-    "Menghubungkan ke Cloudflare..."
-  );
-
-  ws = new WebSocket(
-    makeWSURL()
-  );
-
-  ws.on(
-    "open",
-    () => {
-      ws.send(
-        JSON.stringify({
-          type: "join",
-          role: "owner",
-          ownerKey:
-            OWNER_KEY,
-        })
-      );
-
-      console.log(
-        "Terhubung ke Cloudflare."
-      );
-    }
-  );
+    ws.send(
+      JSON.stringify({
+        type: "join",
+        role: "owner",
+        ownerKey: OWNER_KEY
+      })
+    );
+  });
 
   ws.on(
     "message",
-    (raw) => {
+    raw => {
       let data;
 
       try {
         data =
-          JSON.parse(
-            raw.toString()
-          );
+          JSON.parse(raw);
       } catch {
         return;
       }
 
-      // =========================
-      // AUTH ERROR
-      // =========================
+      /*
+       * LOGIN
+       */
 
       if (
         data.type ===
@@ -111,9 +93,9 @@ function connect() {
         process.exit(1);
       }
 
-      // =========================
-      // OWNER READY
-      // =========================
+      /*
+       * OWNER READY
+       */
 
       if (
         data.type ===
@@ -124,7 +106,7 @@ function connect() {
         );
 
         console.log(
-          "Gunakan 'list' untuk melihat chat."
+          "Menunggu pengunjung..."
         );
 
         rl.prompt();
@@ -132,53 +114,57 @@ function connect() {
         return;
       }
 
-      // =========================
-      // CHAT AVAILABLE
-      // =========================
+      /*
+       * CHAT BARU
+       */
 
       if (
         data.type ===
-          "chat_available" ||
-        data.type ===
-          "chat_new"
+        "chat_new"
       ) {
         chats.set(
           data.chatId,
           {
-            name:
-              data.name ||
-              "Pengunjung",
-            online:
-              Boolean(
-                data.online
-              ),
-            updatedAt:
-              data.updatedAt ||
-              Date.now(),
+            name: data.name,
+            online: data.online
           }
         );
 
-        if (
-          data.type ===
-          "chat_new"
-        ) {
-          console.log(
-            `\n[CHAT BARU] ${data.chatId} | ${data.name}`
-          );
+        console.log(
+          `\n[CHAT BARU] ${data.chatId} | ${data.name} | ${data.online ? "🟢 ONLINE" : "🔴 OFFLINE"}`
+        );
 
-          console.log(
-            `Gunakan: use ${data.chatId}`
-          );
-        }
+        console.log(
+          `Gunakan: use ${data.chatId}`
+        );
 
         rl.prompt();
 
         return;
       }
 
-      // =========================
-      // CHAT STATUS
-      // =========================
+      /*
+       * CHAT YANG SUDAH ADA
+       */
+
+      if (
+        data.type ===
+        "chat_available"
+      ) {
+        chats.set(
+          data.chatId,
+          {
+            name: data.name,
+            online: data.online
+          }
+        );
+
+        return;
+      }
+
+      /*
+       * STATUS
+       */
 
       if (
         data.type ===
@@ -195,28 +181,14 @@ function connect() {
             ...old,
             name:
               data.name ||
-              old.name ||
-              "Pengunjung",
+              old.name,
             online:
-              Boolean(
-                data.online
-              ),
-            updatedAt:
-              data.updatedAt ||
-              Date.now(),
+              data.online
           }
         );
 
         console.log(
-          `\n[STATUS] ${
-            data.name ||
-            old.name ||
-            data.chatId
-          }: ${
-            data.online
-              ? "ONLINE"
-              : "OFFLINE"
-          }`
+          `\n[STATUS] ${data.chatId} | ${data.online ? "🟢 ONLINE" : "🔴 OFFLINE"}`
         );
 
         rl.prompt();
@@ -224,63 +196,41 @@ function connect() {
         return;
       }
 
-      // =========================
-      // HISTORY
-      // =========================
-
-      if (
-        data.type ===
-        "history"
-      ) {
-        console.log(
-          `\n========== RIWAYAT ${data.chatId} ==========`
-        );
-
-        if (
-          !Array.isArray(
-            data.messages
-          ) ||
-          data.messages.length === 0
-        ) {
-          console.log(
-            "(belum ada pesan)"
-          );
-        } else {
-          for (
-            const message of
-              data.messages
-          ) {
-            printMessage(
-              message,
-              false
-            );
-          }
-        }
-
-        console.log(
-          "=========================================="
-        );
-
-        rl.prompt();
-
-        return;
-      }
-
-      // =========================
-      // MESSAGE
-      // =========================
+      /*
+       * MESSAGE
+       */
 
       if (
         data.type ===
         "message"
       ) {
-        printMessage(
-          data,
-          true
-        );
+        /*
+         * Jangan tampilkan pesan
+         * yang sama dua kali.
+         */
 
-        // Chat otomatis menjadi aktif
-        // ketika pengunjung mengirim pesan.
+        if (
+          data.messageId &&
+          receivedMessages.has(
+            data.messageId
+          )
+        ) {
+          return;
+        }
+
+        if (data.messageId) {
+          receivedMessages.add(
+            data.messageId
+          );
+        }
+
+        const name =
+          data.name ||
+          chats.get(
+            data.chatId
+          )?.name ||
+          "Pengunjung";
+
         if (
           data.sender ===
           "visitor"
@@ -289,9 +239,42 @@ function connect() {
             data.chatId;
         }
 
+        chats.set(
+          data.chatId,
+          {
+            ...(chats.get(
+              data.chatId
+            ) || {}),
+            name,
+            online: true
+          }
+        );
+
+        const sender =
+          data.sender ===
+          "visitor"
+            ? "PENGUNJUNG"
+            : "OWNER";
+
+        console.log(
+          `\n[${data.chatId}] ${name} [${sender}] ${data.text}`
+        );
+
         rl.prompt();
 
         return;
+      }
+
+      if (
+        data.type ===
+        "error"
+      ) {
+        console.error(
+          "\nERROR:",
+          data.message
+        );
+
+        rl.prompt();
       }
     }
   );
@@ -316,110 +299,24 @@ function connect() {
 
   ws.on(
     "error",
-    (error) => {
+    error => {
       console.log(
-        "\nWS ERROR:",
+        "\nWS:",
         error.message
       );
     }
   );
 }
 
-function printMessage(
-  message,
-  deduplicate = true
-) {
-  const id =
-    message.messageId ||
-    (
-      message.chatId +
-      "|" +
-      message.sender +
-      "|" +
-      message.time +
-      "|" +
-      message.text
-    );
-
-  if (
-    deduplicate &&
-    seenMessages.has(id)
-  ) {
-    return;
-  }
-
-  seenMessages.add(id);
-
-  const marker =
-    message.sender ===
-    "visitor"
-      ? "PENGUNJUNG"
-      : "OWNER";
-
-  const name =
-    message.name ||
-    chats.get(
-      message.chatId
-    )?.name ||
-    message.chatId;
-
-  let time = "";
-
-  if (message.time) {
-    time =
-      new Date(
-        message.time
-      ).toLocaleTimeString(
-        [],
-        {
-          hour: "2-digit",
-          minute: "2-digit",
-        }
-      );
-  }
-
-  console.log(
-    `\n[${message.chatId}] ${name} [${marker}] ${message.text} ${time ? "(" + time + ")" : ""}`
-  );
-}
+/*
+ * =========================
+ * SEND
+ * =========================
+ */
 
 function send(
   chatId,
   text
-) {
-  if (
-    !ws ||
-    ws.readyState !==
-      WebSocket.OPEN
-  ) {
-    console.log(
-      "Belum terhubung ke Cloudflare."
-    );
-
-    return;
-  }
-
-  if (
-    !chatId ||
-    !text.trim()
-  ) {
-    return;
-  }
-
-  ws.send(
-    JSON.stringify({
-      type: "message",
-      chatId,
-      text:
-        text
-          .trim()
-          .slice(0, 2000),
-    })
-  );
-}
-
-function requestHistory(
-  chatId
 ) {
   if (
     !ws ||
@@ -435,243 +332,201 @@ function requestHistory(
 
   ws.send(
     JSON.stringify({
-      type: "history",
+      type: "message",
       chatId,
+      text
     })
   );
 }
 
+/*
+ * =========================
+ * LIST
+ * =========================
+ */
+
 function list() {
   console.log(
-    "\n========== DAFTAR CHAT =========="
+    "\n===== DAFTAR PENGUNJUNG ====="
   );
 
   if (!chats.size) {
     console.log(
-      "(belum ada chat)"
-    );
-
-    console.log(
-      "================================="
+      "(belum ada pengunjung)"
     );
 
     return;
   }
 
   for (
-    const [id, chat] of
-      chats
+    const [id, chat] of chats
   ) {
     console.log(
-      `${id} | ${
-        chat.online
-          ? "🟢 ONLINE"
-          : "🔴 OFFLINE"
-      } | ${
-        chat.name ||
-        "Pengunjung"
-      }`
+      `${id} | ${chat.online ? "🟢 ONLINE" : "🔴 OFFLINE"} | ${chat.name || "Pengunjung"}`
     );
   }
-
-  console.log(
-    "================================="
-  );
 }
 
-console.log(
-  `
-======================================
-       WEBCHAT OWNER v3
-======================================
+/*
+ * =========================
+ * HELP
+ * =========================
+ */
+
+function help() {
+  console.log(`
 Perintah:
 
 list
+  Menampilkan semua pengunjung.
+
 use <ID>
+  Memilih chat.
+
 reply <pesan>
-/reply <ID> <pesan>
-history
+  Membalas chat aktif.
+
+ /reply <ID> <pesan>
+  Membalas pengunjung tertentu.
+
 exit
+  Keluar.
+`);
+}
+
+console.log(`
 ======================================
-`
-);
+          WEBCHAT OWNER v4
+======================================
+`);
+
+help();
 
 connect();
 
+/*
+ * =========================
+ * COMMAND LINE
+ * =========================
+ */
+
 rl.on(
   "line",
-  (line) => {
-    const x =
+  line => {
+    const input =
       line.trim();
 
-    if (!x) {
+    if (!input) {
       rl.prompt();
       return;
     }
 
-    // LIST
     if (
-      x === "list"
+      input === "list"
     ) {
       list();
-
-      rl.prompt();
-      return;
     }
 
-    // USE CHAT
-    if (
-      x.startsWith(
+    else if (
+      input === "help"
+    ) {
+      help();
+    }
+
+    else if (
+      input.startsWith(
         "use "
       )
     ) {
       const id =
-        x
+        input
           .slice(4)
           .trim();
 
-      if (!id) {
+      if (!chats.has(id)) {
         console.log(
-          "Contoh: use ID_CHAT"
-        );
-
-        rl.prompt();
-        return;
-      }
-
-      active = id;
-
-      console.log(
-        "Chat aktif:",
-        active
-      );
-
-      // Langsung ambil history.
-      requestHistory(
-        active
-      );
-
-      rl.prompt();
-      return;
-    }
-
-    // HISTORY
-    if (
-      x === "history"
-    ) {
-      if (!active) {
-        console.log(
-          "Pilih chat dulu: use <ID>"
+          "ID pengunjung belum dikenal."
         );
       } else {
-        requestHistory(
+        active = id;
+
+        console.log(
+          "Chat aktif:",
           active
         );
       }
-
-      rl.prompt();
-      return;
     }
 
-    // REPLY
-    if (
-      x.startsWith(
+    else if (
+      input.startsWith(
         "reply "
       )
     ) {
       if (!active) {
         console.log(
-          "Pilih chat dulu: use <ID>"
+          "Pilih chat terlebih dahulu:"
         );
 
-        rl.prompt();
-        return;
-      }
-
-      const text =
-        x.slice(6).trim();
-
-      if (!text) {
         console.log(
-          "Pesan kosong."
+          "use <ID>"
         );
-
-        rl.prompt();
-        return;
+      } else {
+        send(
+          active,
+          input.slice(6)
+        );
       }
-
-      send(
-        active,
-        text
-      );
-
-      rl.prompt();
-      return;
     }
 
-    // /reply ID PESAN
-    if (
-      x.startsWith(
+    else if (
+      input.startsWith(
         "/reply "
       )
     ) {
-      const rest =
-        x
-          .slice(7)
-          .trim();
+      const content =
+        input.slice(7).trim();
 
       const space =
-        rest.indexOf(" ");
+        content.indexOf(" ");
 
-      if (
-        space === -1
-      ) {
+      if (space === -1) {
         console.log(
-          "Contoh: /reply ID_CHAT Halo"
+          "Format:"
         );
 
-        rl.prompt();
-        return;
-      }
-
-      const id =
-        rest
-          .slice(
+        console.log(
+          "/reply <ID> <pesan>"
+        );
+      } else {
+        const id =
+          content.slice(
             0,
             space
-          )
-          .trim();
+          );
 
-      const text =
-        rest
-          .slice(
+        const text =
+          content.slice(
             space + 1
-          )
-          .trim();
+          );
 
-      send(
-        id,
-        text
-      );
-
-      rl.prompt();
-      return;
+        send(
+          id,
+          text
+        );
+      }
     }
 
-    // EXIT
-    if (
-      x === "exit"
+    else if (
+      input === "exit"
     ) {
-      try {
-        ws?.close();
-      } catch {}
-
       process.exit(0);
     }
 
-    console.log(
-      "Perintah: list | use <ID> | reply <pesan> | /reply <ID> <pesan> | history | exit"
-    );
+    else {
+      console.log(
+        "Perintah tidak dikenal. Ketik help."
+      );
+    }
 
     rl.prompt();
   }
