@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="id">
 <head>
-  <meta charset="UTF-8">
+  <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>WebChat</title>
   <link rel="stylesheet" href="/style.css">
@@ -9,23 +9,27 @@
 <body>
   <main class="terminal">
     <header>
-      <span class="dot"></span>
-      <span>WEBCHAT // TERMINAL</span>
-      <span id="status">CONNECTING...</span>
+      <div><span class="dot"></span> WEBCHAT</div>
+      <span id="status">Menghubungkan...</span>
     </header>
 
-    <section id="messages" class="messages"></section>
+    <section id="welcome" class="welcome">
+      <h1>WebChat</h1>
+      <p>Masukkan nama untuk memulai percakapan.</p>
+      <div class="join">
+        <input id="name" maxlength="40" placeholder="Nama kamu" autocomplete="name">
+        <button id="join">Masuk Chat</button>
+      </div>
+    </section>
 
-    <form id="form">
-      <span class="prompt">&gt;</span>
-      <input id="input" autocomplete="off" maxlength="2000"
-             placeholder="Ketik pesan..." disabled>
-      <button id="send" disabled>KIRIM</button>
-    </form>
-
-    <footer id="identity">ID: ...</footer>
+    <section id="chat" class="chat hidden">
+      <div id="messages" class="messages"></div>
+      <form id="form" class="composer">
+        <input id="input" maxlength="2000" placeholder="Ketik pesan..." autocomplete="off">
+        <button type="submit">Kirim</button>
+      </form>
+    </section>
   </main>
-
   <script src="/app.js"></script>
 </body>
 </html>
