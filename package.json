@@ -1,11 +1,17 @@
 cat > package.json <<'EOF'
 {
-  "name": "webchat-owner",
-  "version": "4.0.0",
+  "name": "webchat",
+  "version": "1.0.0",
   "private": true,
   "type": "module",
+  "scripts": {
+    "deploy": "wrangler deploy"
+  },
   "dependencies": {
-    "ws": "^8.18.0"
+    "ws": "^8.18.3"
+  },
+  "devDependencies": {
+    "wrangler": "^4.124.0"
   }
 }
 EOF
