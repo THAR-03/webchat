@@ -7,8 +7,11 @@ Deploy command: `npx wrangler deploy`
 
 Create Worker Secret `OWNER_KEY` in Cloudflare.
 
-For Termux owner client only: `npm install --no-save --ignore-scripts ws`
-Then: `SERVER='https://YOUR-WORKER.workers.dev' OWNER_KEY='YOUR_SECRET' node owner.js`
+For Termux owner client only:
+`git clone git clone https://github.com/THAR-03/webchat.git`
+`cd webchat`
+`npm install ws --ignore-scripts`
+`SERVER='https://YOUR-WORKER.workers.dev' OWNER_KEY='YOUR_SECRET' node owner.js`
 
 
 ## Riwayat chat persisten
