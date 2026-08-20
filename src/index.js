@@ -35,8 +35,33 @@ export class ChatHub extends DurableObject {
     }
   }
 
+  async fetch(request) {
+    if (request.headers.get("Upgrade")?.toLowerCase() !== "websocket") {
+      return new Response("WebSocket required", { status: 426 });
+    }
+
+    const pair = new WebSocketPair();
+    const [client, server] = Object.values(pair);
+
+    // Use the Durable Object WebSocket hibernation API. This is required
+    // for webSocketMessage/webSocketClose/webSocketError to be called.
+    this.ctx.acceptWebSocket(server);
+
+    return new Response(null, { status: 101, webSocket: client });
+  }
+
   async getHistory(chatId) {
     return (await this.ctx.storage.get(`history:${chatId}`)) || [];
+  }
+
+  async getChats() {
+    const entries = await this.ctx.storage.list({ prefix: "chat:" });
+    return new Map(entries);
+  }
+
+  async saveChat(chat) {
+    await this.ctx.storage.put(`chat:${chat.chatId}`, chat);
+    this.chats.set(chat.chatId, chat);
   }
 
   async saveMessage(chatId, message) {
@@ -67,17 +92,21 @@ export class ChatHub extends DurableObject {
         }
 
         ws.serializeAttachment({ role: "owner", chatId: "", name: "Owner" });
-        for (const c of this.chats.values()) this.send(ws, { type: "chat_available", ...c });
+        const storedChats = await this.getChats();
+        for (const c of storedChats.values()) {
+          this.chats.set(c.chatId, c);
+          this.send(ws, { type: "chat_available", ...c });
+        }
         this.send(ws, { type: "owner_ready" });
         return;
       }
 
       const chatId = String(d.chatId || "").trim() || crypto.randomUUID();
       const name = String(d.name || "Pengunjung").trim().slice(0, 40) || "Pengunjung";
-      const old = this.chats.get(chatId);
-      const chat = { chatId, name, online: true, updated: Date.now() };
+      const old = this.chats.get(chatId) || await this.ctx.storage.get(`chat:${chatId}`);
+      const chat = { chatId, name: name || old?.name || "Pengunjung", online: true, updated: Date.now() };
 
-      this.chats.set(chatId, chat);
+      await this.saveChat(chat);
       ws.serializeAttachment({ role: "visitor", chatId, name });
 
       const history = await this.getHistory(chatId);
@@ -103,7 +132,7 @@ export class ChatHub extends DurableObject {
       };
 
       const old = this.chats.get(cur.chatId) || {};
-      this.chats.set(cur.chatId, {
+      await this.saveChat({
         ...old,
         chatId: cur.chatId,
         name: cur.name || old.name || "Pengunjung",
@@ -149,6 +178,7 @@ export class ChatHub extends DurableObject {
       if (c) {
         const x = { ...c, online: false, updated: Date.now() };
         this.chats.set(a.chatId, x);
+        this.ctx.storage.put(`chat:${a.chatId}`, x);
         this.broadcast(
           { type: "chat_status", chatId: a.chatId, name: a.name, online: false },
           z => z.role === "owner"
