@@ -4,7 +4,7 @@ export default {
   async fetch(request, env) {
     const u = new URL(request.url);
     if (u.pathname === "/health")
-      return Response.json({ ok: true, service: "webchat", version: 5, ownerKeyConfigured: Boolean(env.OWNER_KEY) });
+      return Response.json({ ok: true, service: "webchat", version: 6, ownerKeyConfigured: Boolean(env.OWNER_KEY) });
     if (u.pathname === "/ws") {
       if (request.headers.get("Upgrade")?.toLowerCase() !== "websocket")
         return new Response("WebSocket required", { status: 426 });
@@ -35,21 +35,6 @@ export class ChatHub extends DurableObject {
     }
   }
 
-  async fetch(request) {
-    if (request.headers.get("Upgrade")?.toLowerCase() !== "websocket") {
-      return new Response("WebSocket required", { status: 426 });
-    }
-
-    const pair = new WebSocketPair();
-    const [client, server] = Object.values(pair);
-
-    // Use the Durable Object WebSocket hibernation API. This is required
-    // for webSocketMessage/webSocketClose/webSocketError to be called.
-    this.ctx.acceptWebSocket(server);
-
-    return new Response(null, { status: 101, webSocket: client });
-  }
-
   async getHistory(chatId) {
     return (await this.ctx.storage.get(`history:${chatId}`)) || [];
   }
@@ -68,14 +53,36 @@ export class ChatHub extends DurableObject {
     const key = `history:${chatId}`;
     const history = await this.getHistory(chatId);
     history.push(message);
-    // Keep a generous limit so a single visitor cannot grow storage forever.
-    const trimmed = history.slice(-1000);
+    // Keep the last 2000 messages per chat. They remain available for owner sync.
+    const trimmed = history.slice(-2000);
     await this.ctx.storage.put(key, trimmed);
+  }
+
+  async syncOwner(ws) {
+    // IMPORTANT: the owner must never depend only on realtime WebSocket events.
+    // On every connect/reconnect, send the persisted history for every known chat.
+    const storedChats = await this.getChats();
+    this.send(ws, { type: "sync_start", totalChats: storedChats.size });
+
+    for (const c of storedChats.values()) {
+      this.chats.set(c.chatId, c);
+      const history = await this.getHistory(c.chatId);
+      this.send(ws, {
+        type: "chat_sync",
+        chatId: c.chatId,
+        name: c.name,
+        online: Boolean(c.online),
+        history
+      });
+    }
+
+    this.send(ws, { type: "sync_end" });
+    this.send(ws, { type: "owner_ready" });
   }
 
   async webSocketMessage(ws, raw) {
     let d;
-    try { d = JSON.parse(raw); } catch { return }
+    try { d = JSON.parse(raw); } catch { return; }
 
     const cur = ws.deserializeAttachment() || {};
 
@@ -92,12 +99,7 @@ export class ChatHub extends DurableObject {
         }
 
         ws.serializeAttachment({ role: "owner", chatId: "", name: "Owner" });
-        const storedChats = await this.getChats();
-        for (const c of storedChats.values()) {
-          this.chats.set(c.chatId, c);
-          this.send(ws, { type: "chat_available", ...c });
-        }
-        this.send(ws, { type: "owner_ready" });
+        await this.syncOwner(ws);
         return;
       }
 
@@ -124,6 +126,7 @@ export class ChatHub extends DurableObject {
       if (!text || !cur.chatId) return;
 
       const message = {
+        id: crypto.randomUUID(),
         chatId: cur.chatId,
         sender: "visitor",
         name: cur.name || "Pengunjung",
@@ -140,6 +143,7 @@ export class ChatHub extends DurableObject {
         updated: Date.now()
       });
 
+      // Persist BEFORE broadcasting. If the owner is offline, the message is still safe.
       await this.saveMessage(cur.chatId, message);
 
       this.broadcast(
@@ -155,6 +159,7 @@ export class ChatHub extends DurableObject {
       if (!chatId || !text) return;
 
       const message = {
+        id: crypto.randomUUID(),
         chatId,
         sender: "owner",
         name: "Owner",
