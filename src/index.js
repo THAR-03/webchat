@@ -16,6 +16,27 @@ export default {
 };
 
 export class ChatHub extends DurableObject {
+  async fetch(request) {
+    // Accept the WebSocket inside the Durable Object.
+    // Without this method, the Worker forwards /ws to ChatHub but the
+    // Durable Object has no WebSocket upgrade handler, which results in
+    // HTTP 500 from Cloudflare.
+    if (request.headers.get("Upgrade")?.toLowerCase() !== "websocket") {
+      return new Response("WebSocket required", { status: 426 });
+    }
+
+    const pair = new WebSocketPair();
+    const client = pair[0];
+    const server = pair[1];
+
+    this.ctx.acceptWebSocket(server);
+
+    return new Response(null, {
+      status: 101,
+      webSocket: client
+    });
+  }
+
   constructor(ctx, env) {
     super(ctx, env);
     this.ctx = ctx;
