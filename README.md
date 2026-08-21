@@ -1,8 +1,6 @@
-# WebChat Cloudflare - v6 Anti Pesan Terlewat
+# WebChat Cloudflare V6
 
-Versi ini memperbaiki masalah ketika Termux/owner WebSocket terputus tetapi pengunjung tetap mengirim pesan.
-
-## Cara kerja anti pesan terlewat
+## Cara kerja Webchat Cloudeflare V6
 
 1. Pesan pengunjung disimpan ke Durable Object **sebelum** dikirim lewat WebSocket.
 2. Setiap kali `owner.js` tersambung atau reconnect, server mengirim ulang riwayat tersimpan untuk semua chat.
@@ -23,8 +21,12 @@ Pastikan Worker Secret `OWNER_KEY` sudah dibuat.
 ## Termux
 
 ```bash
-npm install --no-save --ignore-scripts ws
-SERVER='https://YOUR-WORKER.workers.dev' OWNER_KEY='YOUR_SECRET' node owner.js
+pkg update && pkg upgrade
+pkg install git
+git clone https://github.com/THAR-03/webchat.git
+cd Webchat
+npm install ws --ignore-scripts
+SERVER='https://YOUR-WORKER.workers.dev' OWNER_KEY='YOUR_KEY' node owner.js
 ```
 
 Agar Android tidak terlalu agresif menghentikan proses:
@@ -35,7 +37,7 @@ termux-wake-lock
 
 Tetap disarankan mematikan battery optimization untuk Termux di pengaturan Android.
 
-## Pengujian anti pesan terlewat
+## Pengujian Webchat V6
 
 1. Jalankan `owner.js`.
 2. Pastikan visitor bisa mengirim pesan.
