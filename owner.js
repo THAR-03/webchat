@@ -124,7 +124,7 @@ function list() {
   if (!chats.size) console.log("(belum ada pengunjung)");
 }
 
-console.log("WEBCHAT OWNER v6 - ANTI PESAN TERLEWAT");
+console.log("WEBCHAT OWNER v7 - ANTI PESAN TERLEWAT + NOTIFIKASI");
 console.log("Perintah: list | use <ID> | reply <pesan> | /reply <ID> <pesan> | exit");
 connect();
 
