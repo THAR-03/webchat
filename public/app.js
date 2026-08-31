@@ -1,62 +1,92 @@
 ```javascript
 (() => {
+  "use strict";
+
+  // =========================================================
+  // ELEMENT
+  // =========================================================
+
   const $ = (id) => document.getElementById(id);
 
-  const ID = "webchat_visitor_id";
-  const NAME = "webchat_name";
+  const identity = $("identity");
+  const chat = $("chat");
+  const msgs = $("messages");
+  const status = $("status");
+  const nameInput = $("name");
+  const textInput = $("text");
+  const startButton = $("start");
+  const form = $("form");
+  const newChatButton = $("newChat");
+  const visitorId = $("visitorId");
+
+  // Pastikan semua element HTML tersedia
+  if (
+    !identity ||
+    !chat ||
+    !msgs ||
+    !status ||
+    !nameInput ||
+    !textInput ||
+    !startButton ||
+    !form ||
+    !newChatButton ||
+    !visitorId
+  ) {
+    console.error("WebChat: element HTML tidak lengkap.");
+    return;
+  }
+
+  // =========================================================
+  // STORAGE
+  // =========================================================
+
+  const ID_KEY = "webchat_visitor_id";
+  const NAME_KEY = "webchat_name";
+
+  let chatId = localStorage.getItem(ID_KEY) || "";
+  let name = localStorage.getItem(NAME_KEY) || "";
 
   // =========================================================
   // STATE
   // =========================================================
 
   let ws = null;
-  let manual = false;
-  let retry = null;
-
-  let chatId = localStorage.getItem(ID) || "";
-  let name = localStorage.getItem(NAME) || "";
+  let reconnectTimer = null;
+  let reconnectAttempts = 0;
+  let manualDisconnect = false;
+  let connecting = false;
   let unread = 0;
-
-  // =========================================================
-  // ELEMENT
-  // =========================================================
-
-  const identity = $("identity");
-  const chat = $("chat");
-  const msgs = $("messages");
-  const status = $("status");
-  const nameIn = $("name");
-  const text = $("text");
-
-  nameIn.value = name;
 
   // =========================================================
   // CUSTOM NOTIFICATION SOUND
   // =========================================================
   //
-  // File:
+  // File harus berada di:
+  //
   // public/sounds/owner-reply.mp3
   //
-  // URL:
+  // dan diakses melalui:
+  //
   // /sounds/owner-reply.mp3
   //
 
-  const ownerReplySound = new Audio("/sounds/owner-reply.mp3");
+  const ownerReplySound = new Audio(
+    "/sounds/owner-reply.mp3"
+  );
 
   ownerReplySound.preload = "auto";
   ownerReplySound.volume = 1.0;
 
-  /*
-   * Browser biasanya memblokir audio sebelum user
-   * melakukan interaksi dengan halaman.
-   *
-   * Kita mencoba melakukan "unlock" audio ketika
-   * user menekan tombol CONNECT.
-   */
   let audioUnlocked = false;
 
+  // =========================================================
+  // AUDIO UNLOCK
+  // =========================================================
+
   async function unlockAudio() {
-    if (audioUnlocked) return;
+    if (audioUnlocked) {
+      return;
+    }
 
     try {
       ownerReplySound.muted = true;
@@ -69,29 +99,41 @@
       ownerReplySound.muted = false;
 
       audioUnlocked = true;
-    } catch {
+
+      console.log(
+        "WebChat: audio notification aktif."
+      );
+    } catch (error) {
       ownerReplySound.muted = false;
+
+      console.warn(
+        "WebChat: audio belum dapat diaktifkan.",
+        error
+      );
     }
   }
 
-  /*
-   * Memutar suara ketika owner membalas.
-   */
+  // =========================================================
+  // PLAY OWNER SOUND
+  // =========================================================
+
   async function playOwnerReplySound() {
     try {
       ownerReplySound.pause();
+
       ownerReplySound.currentTime = 0;
+
       ownerReplySound.muted = false;
       ownerReplySound.volume = 1.0;
 
       await ownerReplySound.play();
 
       audioUnlocked = true;
-    } catch {
-      /*
-       * Jika browser menolak autoplay, abaikan.
-       * Chat tetap berjalan normal.
-       */
+    } catch (error) {
+      console.warn(
+        "WebChat: suara notifikasi tidak dapat diputar.",
+        error
+      );
     }
   }
 
@@ -99,9 +141,15 @@
   // STATUS
   // =========================================================
 
-  function stat(ok) {
-    status.textContent = ok ? "ONLINE" : "OFFLINE";
-    status.classList.toggle("online", ok);
+  function setStatus(online) {
+    status.textContent = online
+      ? "ONLINE"
+      : "OFFLINE";
+
+    status.classList.toggle(
+      "online",
+      online
+    );
   }
 
   // =========================================================
@@ -109,7 +157,7 @@
   // =========================================================
 
   function updateTitle() {
-    document.title = unread
+    document.title = unread > 0
       ? `(${unread}) Pesan baru — WebChat Linux`
       : "WebChat Linux";
   }
@@ -120,16 +168,108 @@
   }
 
   // =========================================================
+  // SYSTEM MESSAGE
+  // =========================================================
+
+  function systemMessage(message) {
+    const element =
+      document.createElement("div");
+
+    element.className = "msg system";
+
+    element.textContent =
+      "[system] " + message;
+
+    msgs.appendChild(element);
+
+    msgs.scrollTop =
+      msgs.scrollHeight;
+  }
+
+  // =========================================================
+  // ADD CHAT MESSAGE
+  // =========================================================
+
+  function addMessage(
+    sender,
+    messageName,
+    messageText,
+    time
+  ) {
+    const element =
+      document.createElement("div");
+
+    element.className =
+      "msg " +
+      (
+        sender === "owner"
+          ? "owner"
+          : "visitor"
+      );
+
+    const meta =
+      document.createElement("div");
+
+    meta.className = "meta";
+
+    let formattedTime = "";
+
+    if (time) {
+      try {
+        formattedTime =
+          new Date(time)
+            .toLocaleTimeString([], {
+              hour: "2-digit",
+              minute: "2-digit"
+            });
+      } catch {}
+    }
+
+    meta.textContent =
+      (messageName || "Pengunjung") +
+      (formattedTime
+        ? " " + formattedTime
+        : "");
+
+    const body =
+      document.createElement("div");
+
+    body.textContent =
+      messageText || "";
+
+    element.appendChild(meta);
+    element.appendChild(body);
+
+    msgs.appendChild(element);
+
+    msgs.scrollTop =
+      msgs.scrollHeight;
+  }
+
+  // =========================================================
+  // BROWSER NOTIFICATION
+  // =========================================================
+
+  function requestNotificationPermission() {
+    if (
+      "Notification" in window &&
+      Notification.permission === "default"
+    ) {
+      Notification.requestPermission()
+        .catch(() => {});
+    }
+  }
+
+  // =========================================================
   // OWNER NOTIFICATION
   // =========================================================
 
-  function notifyOwner(d) {
+  function notifyOwner(message) {
     unread++;
+
     updateTitle();
 
-    /*
-     * Browser Notification
-     */
+    // Browser notification jika tab sedang tidak aktif
     if (
       document.hidden &&
       "Notification" in window &&
@@ -139,84 +279,64 @@
         new Notification(
           "WebChat — Owner membalas",
           {
-            body: d.text || "Pesan baru dari Owner",
+            body:
+              message.text ||
+              "Pesan baru dari Owner",
+
             tag: "webchat-owner",
+
             renotify: true
           }
         );
       } catch {}
     }
 
-    /*
-     * CUSTOM SOUND
-     */
+    // Suara custom
     playOwnerReplySound();
   }
 
   // =========================================================
-  // REQUEST BROWSER NOTIFICATION
+  // SHOW CHAT
   // =========================================================
 
-  function requestNotification() {
-    if (
-      "Notification" in window &&
-      Notification.permission === "default"
-    ) {
-      Notification.requestPermission().catch(() => {});
+  function showChat() {
+    identity.classList.add("hidden");
+    chat.classList.remove("hidden");
+
+    visitorId.textContent =
+      "ID: " + chatId;
+
+    textInput.focus();
+  }
+
+  // =========================================================
+  // SHOW IDENTITY
+  // =========================================================
+
+  function showIdentity() {
+    chat.classList.add("hidden");
+    identity.classList.remove("hidden");
+  }
+
+  // =========================================================
+  // CLOSE CURRENT SOCKET
+  // =========================================================
+
+  function closeSocket() {
+    if (!ws) {
+      return;
     }
-  }
 
-  // =========================================================
-  // ADD MESSAGE
-  // =========================================================
+    try {
+      ws.onopen = null;
+      ws.onmessage = null;
+      ws.onerror = null;
+      ws.onclose = null;
 
-  function add(sender, n, t, time) {
-    const e = document.createElement("div");
+      ws.close();
+    } catch {}
 
-    e.className =
-      "msg " + (sender === "owner" ? "owner" : "visitor");
-
-    const m = document.createElement("div");
-
-    m.className = "meta";
-
-    m.textContent =
-      (n || "Pengunjung") +
-      " " +
-      (
-        time
-          ? new Date(time).toLocaleTimeString([], {
-              hour: "2-digit",
-              minute: "2-digit"
-            })
-          : ""
-      );
-
-    const b = document.createElement("div");
-
-    b.textContent = t;
-
-    e.append(m, b);
-
-    msgs.append(e);
-
-    msgs.scrollTop = msgs.scrollHeight;
-  }
-
-  // =========================================================
-  // SYSTEM MESSAGE
-  // =========================================================
-
-  function sys(t) {
-    const e = document.createElement("div");
-
-    e.className = "msg system";
-
-    e.textContent = "[system] " + t;
-
-    msgs.append(e);
-
-    msgs.scrollTop = msgs.scrollHeight;
+    ws = null;
   }
 
   // =========================================================
@@ -224,111 +344,212 @@
   // =========================================================
 
   function connect() {
+    // Jangan membuat koneksi ganda
     if (
-      manual ||
-      ws?.readyState === WebSocket.OPEN ||
-      ws?.readyState === WebSocket.CONNECTING
+      ws &&
+      (
+        ws.readyState === WebSocket.OPEN ||
+        ws.readyState === WebSocket.CONNECTING
+      )
     ) {
       return;
     }
+
+    if (connecting) {
+      return;
+    }
+
+    connecting = true;
+
+    clearTimeout(reconnectTimer);
+
+    setStatus(false);
 
     const protocol =
       location.protocol === "https:"
         ? "wss://"
         : "ws://";
 
-    ws = new WebSocket(
-      protocol + location.host + "/ws"
+    const websocketUrl =
+      protocol +
+      location.host +
+      "/ws";
+
+    console.log(
+      "WebChat: connecting to",
+      websocketUrl
     );
+
+    try {
+      ws = new WebSocket(
+        websocketUrl
+      );
+    } catch (error) {
+      connecting = false;
+
+      console.error(
+        "WebChat: gagal membuat WebSocket.",
+        error
+      );
+
+      systemMessage(
+        "Gagal membuat koneksi WebSocket."
+      );
+
+      scheduleReconnect();
+
+      return;
+    }
 
     // =======================================================
     // OPEN
     // =======================================================
 
     ws.onopen = () => {
-      stat(true);
-
-      ws.send(
-        JSON.stringify({
-          type: "join",
-          role: "visitor",
-          chatId,
-          name
-        })
+      console.log(
+        "WebChat: WebSocket connected."
       );
+
+      connecting = false;
+
+      reconnectAttempts = 0;
+
+      setStatus(true);
+
+      /*
+       * Kirim identitas visitor ke server.
+       */
+      const joinData = {
+        type: "join",
+        role: "visitor",
+        chatId: chatId || "",
+        name: name || "Pengunjung"
+      };
+
+      console.log(
+        "WebChat: sending join",
+        joinData
+      );
+
+      try {
+        ws.send(
+          JSON.stringify(joinData)
+        );
+      } catch (error) {
+        console.error(
+          "WebChat: gagal mengirim join.",
+          error
+        );
+      }
     };
 
     // =======================================================
     // MESSAGE
     // =======================================================
 
-    ws.onmessage = (e) => {
-      let d;
+    ws.onmessage = (event) => {
+      let data;
 
       try {
-        d = JSON.parse(e.data);
-      } catch {
+        data =
+          JSON.parse(event.data);
+      } catch (error) {
+        console.warn(
+          "WebChat: pesan server bukan JSON.",
+          event.data
+        );
+
         return;
       }
+
+      console.log(
+        "WebChat: received",
+        data
+      );
 
       // -----------------------------------------------------
       // JOINED
       // -----------------------------------------------------
 
-      if (d.type === "joined") {
-        chatId = d.chatId;
+      if (data.type === "joined") {
+        chatId =
+          String(data.chatId || "");
 
-        localStorage.setItem(ID, chatId);
+        if (!chatId) {
+          console.error(
+            "WebChat: server tidak mengirim chatId."
+          );
 
-        $("visitorId").textContent =
-          "ID: " + chatId;
+          systemMessage(
+            "Server tidak memberikan ID pengunjung."
+          );
 
-        identity.classList.add("hidden");
-        chat.classList.remove("hidden");
+          return;
+        }
 
+        // Simpan ID
+        localStorage.setItem(
+          ID_KEY,
+          chatId
+        );
+
+        // Pastikan nama juga tersimpan
+        localStorage.setItem(
+          NAME_KEY,
+          name
+        );
+
+        // Tampilkan halaman chat
+        showChat();
+
+        // Bersihkan pesan lama dari UI
         msgs.innerHTML = "";
 
         resetUnread();
 
-        if (Array.isArray(d.history)) {
-          d.history.forEach((m) => {
-            add(
-              m.sender,
-              m.name,
-              m.text,
-              m.time
-            );
-          });
+        // Tampilkan history
+        if (
+          Array.isArray(data.history)
+        ) {
+          data.history.forEach(
+            (message) => {
+              addMessage(
+                message.sender,
+                message.name,
+                message.text,
+                message.time
+              );
+            }
+          );
         }
 
-        sys("Connected. Riwayat chat dipulihkan.");
-
-        text.focus();
+        systemMessage(
+          "Connected. Riwayat chat dipulihkan."
+        );
 
         return;
       }
 
       // -----------------------------------------------------
-      // MESSAGE
+      // CHAT MESSAGE
       // -----------------------------------------------------
 
-      if (d.type === "message") {
-        add(
-          d.sender,
-          d.name,
-          d.text,
-          d.time
+      if (data.type === "message") {
+        addMessage(
+          data.sender,
+          data.name,
+          data.text,
+          data.time
         );
 
         /*
-         * HANYA owner yang memicu:
-         *
-         * - unread
-         * - browser notification
-         * - custom sound
+         * Hanya pesan owner yang memicu
+         * notifikasi suara.
          */
-        if (d.sender === "owner") {
-          notifyOwner(d);
+        if (
+          data.sender === "owner"
+        ) {
+          notifyOwner(data);
         }
 
         return;
@@ -338,25 +559,31 @@
       // ERROR
       // -----------------------------------------------------
 
-      if (d.type === "error") {
-        sys(d.message);
-      }
-    };
-
-    // =======================================================
-    // CLOSE
-    // =======================================================
-
-    ws.onclose = () => {
-      stat(false);
-
-      if (!manual) {
-        clearTimeout(retry);
-
-        retry = setTimeout(
-          connect,
-          2500
+      if (data.type === "error") {
+        console.error(
+          "WebChat server error:",
+          data.message
         );
+
+        systemMessage(
+          data.message ||
+          "Terjadi kesalahan pada server."
+        );
+
+        return;
+      }
+
+      // -----------------------------------------------------
+      // AUTH ERROR
+      // -----------------------------------------------------
+
+      if (data.type === "auth_error") {
+        systemMessage(
+          data.message ||
+          "Autentikasi gagal."
+        );
+
+        return;
       }
     };
 
@@ -364,96 +591,263 @@
     // ERROR
     // =======================================================
 
-    ws.onerror = () => {
-      stat(false);
+    ws.onerror = (error) => {
+      console.error(
+        "WebChat: WebSocket error.",
+        error
+      );
+
+      connecting = false;
+
+      setStatus(false);
+    };
+
+    // =======================================================
+    // CLOSE
+    // =======================================================
+
+    ws.onclose = (event) => {
+      console.warn(
+        "WebChat: WebSocket closed.",
+        event.code,
+        event.reason
+      );
+
+      connecting = false;
+
+      setStatus(false);
+
+      ws = null;
+
+      if (!manualDisconnect) {
+        scheduleReconnect();
+      }
     };
   }
 
   // =========================================================
-  // START / CONNECT BUTTON
+  // RECONNECT
   // =========================================================
 
-  $("start").onclick = async () => {
-    name =
-      nameIn.value.trim() ||
-      "Pengunjung";
+  function scheduleReconnect() {
+    clearTimeout(reconnectTimer);
 
-    localStorage.setItem(
-      NAME,
-      name
+    if (manualDisconnect) {
+      return;
+    }
+
+    reconnectAttempts++;
+
+    const delay =
+      Math.min(
+        10000,
+        1500 * reconnectAttempts
+      );
+
+    console.log(
+      `WebChat: reconnect dalam ${delay}ms`
     );
 
-    /*
-     * Unlock audio melalui interaksi user.
-     */
-    await unlockAudio();
+    reconnectTimer =
+      setTimeout(() => {
+        connect();
+      }, delay);
+  }
 
-    /*
-     * Browser notification.
-     */
-    requestNotification();
+  // =========================================================
+  // CONNECT BUTTON
+  // =========================================================
 
-    /*
-     * WebSocket.
-     */
-    connect();
-  };
+  startButton.addEventListener(
+    "click",
+    async () => {
+      /*
+       * Ambil nickname
+       */
+      name =
+        nameInput.value.trim();
+
+      if (!name) {
+        name = "Pengunjung";
+      }
+
+      /*
+       * Batasi nama sesuai server.
+       */
+      name =
+        name.slice(0, 40);
+
+      /*
+       * Simpan nama
+       */
+      localStorage.setItem(
+        NAME_KEY,
+        name
+      );
+
+      /*
+       * Aktifkan audio melalui
+       * interaksi pengguna.
+       */
+      await unlockAudio();
+
+      /*
+       * Minta izin browser notification.
+       */
+      requestNotificationPermission();
+
+      /*
+       * Jika socket lama bermasalah,
+       * bersihkan terlebih dahulu.
+       */
+      if (
+        ws &&
+        ws.readyState === WebSocket.CLOSED
+      ) {
+        ws = null;
+      }
+
+      manualDisconnect = false;
+
+      /*
+       * Mulai koneksi.
+       */
+      connect();
+    }
+  );
 
   // =========================================================
   // SEND MESSAGE
   // =========================================================
 
-  $("form").onsubmit = (e) => {
-    e.preventDefault();
+  form.addEventListener(
+    "submit",
+    (event) => {
+      event.preventDefault();
 
-    resetUnread();
+      const message =
+        textInput.value.trim();
 
-    const t = text.value.trim();
+      if (!message) {
+        return;
+      }
 
-    if (!t) {
-      return;
+      if (
+        !ws ||
+        ws.readyState !== WebSocket.OPEN
+      ) {
+        systemMessage(
+          "Belum terhubung ke server."
+        );
+
+        return;
+      }
+
+      try {
+        ws.send(
+          JSON.stringify({
+            type: "message",
+            chatId,
+            text: message
+          })
+        );
+
+        textInput.value = "";
+
+        textInput.focus();
+
+        resetUnread();
+      } catch (error) {
+        console.error(
+          "WebChat: gagal mengirim pesan.",
+          error
+        );
+
+        systemMessage(
+          "Pesan gagal dikirim."
+        );
+      }
     }
-
-    if (
-      !ws ||
-      ws.readyState !== WebSocket.OPEN
-    ) {
-      sys("Belum terhubung.");
-
-      connect();
-
-      return;
-    }
-
-    ws.send(
-      JSON.stringify({
-        type: "message",
-        chatId,
-        text: t
-      })
-    );
-
-    text.value = "";
-
-    text.focus();
-  };
+  );
 
   // =========================================================
-  // SCROLL
+  // NEW CHAT
   // =========================================================
 
-  msgs.addEventListener("scroll", () => {
-    if (
-      msgs.scrollTop +
-        msgs.clientHeight >=
-      msgs.scrollHeight - 20
-    ) {
+  newChatButton.addEventListener(
+    "click",
+    () => {
+      const confirmed =
+        window.confirm(
+          "Buat ID baru?"
+        );
+
+      if (!confirmed) {
+        return;
+      }
+
+      /*
+       * Hentikan reconnect sementara.
+       */
+      manualDisconnect = true;
+
+      clearTimeout(
+        reconnectTimer
+      );
+
+      /*
+       * Tutup WebSocket.
+       */
+      closeSocket();
+
+      /*
+       * Hapus ID lama.
+       */
+      localStorage.removeItem(
+        ID_KEY
+      );
+
+      chatId = "";
+
+      /*
+       * Bersihkan pesan.
+       */
+      msgs.innerHTML = "";
+
       resetUnread();
+
+      /*
+       * Kembali ke halaman nickname.
+       */
+      showIdentity();
+
+      /*
+       * Izinkan koneksi baru.
+       */
+      manualDisconnect = false;
     }
-  });
+  );
 
   // =========================================================
-  // VISIBILITY
+  // RESET UNREAD WHEN USER READS CHAT
+  // =========================================================
+
+  msgs.addEventListener(
+    "scroll",
+    () => {
+      const nearBottom =
+        msgs.scrollTop +
+          msgs.clientHeight >=
+        msgs.scrollHeight - 20;
+
+      if (nearBottom) {
+        resetUnread();
+      }
+    }
+  );
+
+  // =========================================================
+  // TAB ACTIVE
   // =========================================================
 
   document.addEventListener(
@@ -466,56 +860,37 @@
   );
 
   // =========================================================
-  // NEW CHAT
-  // =========================================================
-
-  $("newChat").onclick = () => {
-    if (
-      !confirm(
-        "Buat ID baru? Riwayat chat ID saat ini tetap tersimpan, tetapi chat baru akan dimulai."
-      )
-    ) {
-      return;
-    }
-
-    localStorage.removeItem(ID);
-
-    chatId = "";
-
-    msgs.innerHTML = "";
-
-    resetUnread();
-
-    manual = true;
-
-    ws?.close();
-
-    manual = false;
-
-    identity.classList.remove("hidden");
-
-    chat.classList.add("hidden");
-  };
-
-  // =========================================================
-  // INITIAL TITLE
+  // INITIAL STATE
   // =========================================================
 
   updateTitle();
 
-  // =========================================================
-  // RESTORE PREVIOUS CHAT
-  // =========================================================
+  nameInput.value = name;
 
+  /*
+   * Jika browser sudah memiliki
+   * chatId + nickname, otomatis
+   * lanjut ke chat.
+   */
   if (chatId && name) {
-    $("visitorId").textContent =
+    showChat();
+
+    visitorId.textContent =
       "ID: " + chatId;
 
-    identity.classList.add("hidden");
-
-    chat.classList.remove("hidden");
+    manualDisconnect = false;
 
     connect();
+  } else {
+    showIdentity();
   }
+
+  // =========================================================
+  // DEBUG
+  // =========================================================
+
+  console.log(
+    "WebChat visitor initialized."
+  );
 })();
 ```
